@@ -68,6 +68,159 @@ local function SetArrowAtlas(arrow, atlasName, fallbackR, fallbackG, fallbackB, 
     end
 end
 
+--------------------------------------------------------------------------
+-- Loading spinner
+--------------------------------------------------------------------------
+-- Ascension gear can't be read in one look (see the confirmation pass in
+-- 03_scan.lua), so there is a real moment — usually a few tenths of a
+-- second, occasionally longer while the client fetches an instance — where
+-- the addon has an opinion but hasn't finished checking it. That moment
+-- used to be invisible: the tooltip said nothing, or said something it
+-- might quietly revise a heartbeat later.
+--
+-- So while a comparison is unconfirmed, the item wears a small spinner in
+-- the exact spot its verdict arrow will occupy — three dots chasing each
+-- other around the icon's corner, or around the tooltip's verdict line.
+-- When the scan settles the spinner is replaced by the arrow (or by
+-- nothing, if the item turned out not to be an upgrade), so the swap reads
+-- as an answer arriving rather than as UI churn.
+--
+-- Mechanics kept deliberately plain for a 2009 client: no rotation API
+-- (3.3.5 textures have none), no animation groups, no per-widget OnUpdate.
+-- One driver frame walks the handful of live spinners and moves their dots
+-- around a circle; it stops itself the moment none are left.
+local SPINNER_DOTS = 3
+local SPINNER_DOT_SIZE = 4
+local SPINNER_RADIUS = 5.5
+local SPINNER_SPEED = 3.2        -- radians/second
+local SPINNER_ARC = 0.6          -- radians between the chasing dots
+local SPINNER_ALPHA = { 0.95, 0.55, 0.28 }
+local SPINNER_R, SPINNER_G, SPINNER_B = 1, 0.82, 0
+-- Most scans confirm inside this, and a spinner that appears and vanishes
+-- again in three frames is just flicker — so nothing is drawn until a
+-- comparison has actually been slow. On a settled bag this means no
+-- spinners at all, which is the intended resting state.
+local SPINNER_DELAY = 0.35
+-- A bag wall can put a hundred items on screen at once; only ever animate a
+-- sane handful of them. The rest still resolve, they just do it quietly.
+local SPINNER_MAX_ACTIVE = 16
+
+local sin, cos = math.sin, math.cos
+local TWO_PI = math.pi * 2
+
+local activeSpinners = setmetatable({}, { __mode = "k" })
+local activeSpinnerCount = 0
+local spinnerAngle = 0
+
+local spinnerDriver = CreateFrame("Frame")
+spinnerDriver:Hide()
+
+local function SpinnerDotsHide(sp)
+    for i = 1, SPINNER_DOTS do sp.dots[i]:Hide() end
+end
+
+spinnerDriver:SetScript("OnUpdate", function(self, elapsed)
+    spinnerAngle = spinnerAngle + elapsed * SPINNER_SPEED
+    if spinnerAngle > TWO_PI then spinnerAngle = spinnerAngle - TWO_PI end
+    local now = GetTime()
+    -- Recounted here rather than only tracked on show/hide: activeSpinners
+    -- is weak-keyed, so an owner that gets collected takes its entry with it
+    -- and would otherwise leave the budget permanently spent.
+    local live = 0
+    for sp in pairs(activeSpinners) do
+        -- The anchor can go away underneath us (a bag closing, a tooltip
+        -- hiding without firing our hooks). Stop entirely rather than
+        -- leaving dots floating over whatever takes its place, or holding a
+        -- slot in the budget for a widget nobody can see; whatever brings
+        -- the item back on screen starts the spinner again.
+        if not sp.anchor or not sp.anchor:IsVisible() then
+            sp.active = nil
+            activeSpinners[sp] = nil
+            SpinnerDotsHide(sp)
+        else
+            live = live + 1
+            if now >= sp.revealAt then
+                for i = 1, SPINNER_DOTS do
+                    local a = spinnerAngle - (i - 1) * SPINNER_ARC
+                    local dot = sp.dots[i]
+                    dot:ClearAllPoints()
+                    dot:SetPoint("CENTER", sp.anchor, sp.relPoint,
+                        sp.x + cos(a) * SPINNER_RADIUS,
+                        sp.y + sin(a) * SPINNER_RADIUS)
+                    dot:Show()
+                end
+            end
+        end
+    end
+    activeSpinnerCount = live
+    if live == 0 then self:Hide() end
+end)
+
+local function CreateSpinner(owner, field)
+    local sp = owner[field]
+    if sp then return sp end
+    sp = { dots = {} }
+    for i = 1, SPINNER_DOTS do
+        local dot = owner:CreateTexture(nil, "OVERLAY")
+        dot:SetWidth(SPINNER_DOT_SIZE)
+        dot:SetHeight(SPINNER_DOT_SIZE)
+        -- SetTexture returns false for a missing file on this client, which
+        -- is the same escape hatch the arrow art uses: fall back to a flat
+        -- colored quad so the spinner still reads.
+        if dot:SetTexture("Interface\\Buttons\\WHITE8X8") then
+            dot:SetVertexColor(SPINNER_R, SPINNER_G, SPINNER_B)
+        else
+            dot:SetTexture(SPINNER_R, SPINNER_G, SPINNER_B, 1)
+        end
+        dot:SetAlpha(SPINNER_ALPHA[i] or 0.3)
+        dot:Hide()
+        sp.dots[i] = dot
+    end
+    owner[field] = sp
+    return sp
+end
+
+-- Starts (or keeps) the spinner stored on owner[field], orbiting the point
+-- (x, y) relative to anchor's relPoint. Idempotent: calling it again while
+-- the spinner is already running does NOT restart its reveal delay, so a
+-- widget that re-evaluates itself on every redraw doesn't reset the clock
+-- and end up never showing anything.
+local function SpinnerShow(owner, field, anchor, relPoint, x, y)
+    if RefactorCompareDB and RefactorCompareDB.compareSpinner == false then
+        local existing = owner[field]
+        if existing and existing.active then
+            existing.active = nil
+            activeSpinners[existing] = nil
+            activeSpinnerCount = activeSpinnerCount - 1
+            SpinnerDotsHide(existing)
+        end
+        return
+    end
+    local sp = owner[field]
+    if not sp and activeSpinnerCount >= SPINNER_MAX_ACTIVE then return end
+    sp = sp or CreateSpinner(owner, field)
+    sp.anchor, sp.relPoint, sp.x, sp.y = anchor, relPoint, x, y
+    if not sp.active then
+        if activeSpinnerCount >= SPINNER_MAX_ACTIVE then return end
+        sp.active = true
+        sp.revealAt = GetTime() + SPINNER_DELAY
+        activeSpinners[sp] = true
+        activeSpinnerCount = activeSpinnerCount + 1
+        spinnerDriver:Show()
+    end
+end
+
+local function SpinnerHide(owner, field)
+    local sp = owner and owner[field]
+    if not sp then return end
+    if sp.active then
+        sp.active = nil
+        activeSpinners[sp] = nil
+        activeSpinnerCount = activeSpinnerCount - 1
+    end
+    SpinnerDotsHide(sp)
+end
+
 -- Secondary-profile verdict color: one hue for everything secondary (text,
 -- tooltip arrow, bag arrow, up and down) — color identifies the PROFILE,
 -- arrow direction carries the verdict. Blue stays clear of the primary
@@ -121,6 +274,35 @@ end
 local function HideLineArrow(tooltip)
     if tooltip.refactorLineArrow then tooltip.refactorLineArrow:Hide() end
     if tooltip.refactorLineArrow2 then tooltip.refactorLineArrow2:Hide() end
+    SpinnerHide(tooltip, "refactorSpinner")
+end
+
+-- Lines this addon appended to a tooltip itself (as opposed to the
+-- right-column text it borrows from an existing row). A provisional verdict
+-- is re-drawn on every retry pass until it settles, and the tooltip is NOT
+-- cleared in between — so without remembering the line we already own, each
+-- pass would append another copy of the verdict.
+local function SetOwnLine(tooltip, field, text, r, g, b)
+    local name = tooltip:GetName()
+    local idx = tooltip[field]
+    if idx and idx >= 2 and idx <= tooltip:NumLines() then
+        local fs = _G[name .. "TextLeft" .. idx]
+        if fs then
+            fs:SetText(text)
+            fs:SetTextColor(r, g, b)
+            fs:Show()
+            return fs, idx
+        end
+    end
+    tooltip:AddLine(text, r, g, b)
+    idx = tooltip:NumLines()
+    tooltip[field] = idx
+    return _G[name .. "TextLeft" .. idx], idx
+end
+
+local function ForgetOwnLines(tooltip)
+    tooltip.refactorOwnLine = nil
+    tooltip.refactorOwnLine2 = nil
 end
 
 -- Rows whose right column is reliably blank, tried in order so the verdict
@@ -170,10 +352,42 @@ local function SetRowRightTextAt(tooltip, i, text, r, g, b)
     return right
 end
 
+-- Where the spinner orbits, measured left from the verdict arrow's right
+-- edge (which is at -2 from the text, or at sharedOffset when both verdict
+-- lines align to a column). With an arrow present the dots clear it
+-- entirely; with no arrow to show yet they take its place.
+local SPINNER_ARROW_EDGE = -2   -- the arrow's own right edge, sans column alignment
+local SPINNER_BESIDE_ARROW = 20 -- left of a 12px-wide arrow, plus breathing room
+local SPINNER_IN_ARROW_SLOT = 6 -- centered where that arrow would have been
+
+-- Returns drawn, pending:
+--   drawn   = a verdict (or a "still comparing" placeholder) is on the
+--             tooltip. Callers retry while this is false.
+--   pending = what's drawn is provisional; the scan behind it hasn't been
+--             confirmed yet, so callers keep retrying to catch the settled
+--             version even though something is already showing.
 local function AddCompareLine(tooltip, link, bag, slot, invSlot, src)
     if not RefactorCompareDB or not RefactorCompareDB.enabled then return end
-    local result = CompareItem(link, bag, slot, invSlot, src)
-    if not result then return end
+    local result, waiting = CompareItem(link, bag, slot, invSlot, src)
+    if not result then
+        -- Gear we ought to be able to judge and can't yet — the item isn't
+        -- in the client cache, or its instance is still rendering as the
+        -- base item. Say that plainly instead of leaving a silent tooltip
+        -- that might sprout a verdict a moment later with no explanation.
+        if waiting then
+            local fs = SetOwnLine(tooltip, "refactorOwnLine", "Comparing", 0.6, 0.6, 0.6)
+            if tooltip.refactorLineArrow then tooltip.refactorLineArrow:Hide() end
+            if tooltip.refactorLineArrow2 then tooltip.refactorLineArrow2:Hide() end
+            if fs then
+                SpinnerShow(tooltip, "refactorSpinner", fs, "LEFT",
+                    SPINNER_ARROW_EDGE - SPINNER_IN_ARROW_SLOT, 0)
+            end
+            tooltip:Show()
+            return false, true
+        end
+        HideLineArrow(tooltip)
+        return
+    end
 
     HideLineArrow(tooltip)
 
@@ -231,9 +445,7 @@ local function AddCompareLine(tooltip, link, bag, slot, invSlot, src)
 
     local fontString, primaryLine = SetCompareRowText(tooltip, text, r, g, b)
     if not fontString then
-        tooltip:AddLine(text, r, g, b)
-        primaryLine = tooltip:NumLines()
-        fontString = _G[tooltip:GetName() .. "TextLeft" .. primaryLine]
+        fontString, primaryLine = SetOwnLine(tooltip, "refactorOwnLine", text, r, g, b)
     end
 
     -- Secondary profile's verdict: rides the right column of the row
@@ -283,8 +495,7 @@ local function AddCompareLine(tooltip, link, bag, slot, invSlot, src)
 
         fs2 = primaryLine and SetRowRightTextAt(tooltip, primaryLine + 1, display, r2, g2, b2)
         if not fs2 then
-            tooltip:AddLine(display, r2, g2, b2)
-            fs2 = _G[tooltip:GetName() .. "TextLeft" .. tooltip:NumLines()]
+            fs2 = SetOwnLine(tooltip, "refactorOwnLine2", display, r2, g2, b2)
         end
     end
 
@@ -299,8 +510,24 @@ local function AddCompareLine(tooltip, link, bag, slot, invSlot, src)
         ShowLineArrow(tooltip, fs2, r2, g2, b2, arrowDir2 == "down", "refactorLineArrow2", sharedOffset)
     end
 
+    -- Still confirming: the verdict shows in full — withholding a number
+    -- that is right the vast majority of the time helps nobody — with the
+    -- spinner alongside it saying the addon is taking a second look. It
+    -- only becomes visible if that look actually takes a while (see
+    -- SPINNER_DELAY); the usual case resolves before anything is drawn.
+    if result.pending then
+        local rel = sharedOffset and "RIGHT" or "LEFT"
+        local edge = sharedOffset or SPINNER_ARROW_EDGE
+        SpinnerShow(tooltip, "refactorSpinner", fontString, rel,
+            edge - (arrowDir and SPINNER_BESIDE_ARROW or SPINNER_IN_ARROW_SLOT), 0)
+    else
+        SpinnerHide(tooltip, "refactorSpinner")
+    end
+
     tooltip:Show()
-    return true -- a verdict was drawn (callers retry while this is falsy)
+    -- A verdict was drawn (callers retry while this is falsy); the second
+    -- return keeps them retrying while it is only a provisional one.
+    return true, result.pending or false
 end
 
 -- Figure out which real item the tooltip is showing, so the scaled
@@ -435,8 +662,8 @@ local function LinkIsEquipped(link)
 end
 
 -- Verdict retry: some live sources start out unreadable — a loot-roll
--- tooltip's first render can carry the stale base armor (see the
--- stale-armor check in ScanItem) or its item data hasn't arrived yet —
+-- tooltip's first render can carry the stale base item (see the
+-- stale-render check in ScanItem) or its item data hasn't arrived yet —
 -- and unlike bag tooltips, the client doesn't always re-set those once
 -- the real data lands, so a verdict discarded at hover time would stay
 -- missing for the whole roll. While the same tooltip keeps showing the
@@ -444,13 +671,21 @@ end
 -- correctly stays absent: equipped-gear re-renders count as settled) or
 -- the attempts run out. Verdicts that are legitimately never shown
 -- (non-gear, quality-filtered) just let the retries expire silently.
+--
+-- The loop keeps running past the first drawn verdict while that verdict
+-- is provisional: each pass is another sample of the hovered item, so a
+-- tooltip left under the cursor is exactly where confirmation happens
+-- fastest. The retry interval sits above the scan's own minimum sampling
+-- gap on purpose — every pass counts as a fresh look.
 local tipRetryFrame = CreateFrame("Frame")
 tipRetryFrame:Hide()
 local tipRetryTip, tipRetryLink, tipRetryElapsed, tipRetryTries
 
 local function StartTipRetry(tip, link)
     tipRetryTip, tipRetryLink = tip, link
-    tipRetryElapsed, tipRetryTries = 0, 8
+    -- Enough passes to cover the confirmation budget (VERIFY_MAX_SAMPLES in
+    -- 03_scan.lua) on top of the old wait for an item to reach the cache.
+    tipRetryElapsed, tipRetryTries = 0, 12
     tipRetryFrame:Show()
 end
 
@@ -471,10 +706,17 @@ tipRetryFrame:SetScript("OnUpdate", function(self, elapsed)
         if not (bag or slot or invSlot or src) and LinkIsEquipped(link) then
             done = true -- correctly verdict-free, stop retrying
         else
-            done = AddCompareLine(tip, link, bag, slot, invSlot, src)
+            local drawn, pending = AddCompareLine(tip, link, bag, slot, invSlot, src)
+            -- Drawn but provisional isn't done: keep sampling until the
+            -- scan confirms itself (or the budget runs out and the last
+            -- reading stands).
+            done = drawn and not pending
         end
     end
-    if done or tipRetryTries <= 0 then self:Hide() end
+    if done or tipRetryTries <= 0 then
+        if tipRetryTries <= 0 then SpinnerHide(tip, "refactorSpinner") end
+        self:Hide()
+    end
 end)
 
 local function HookTooltip(tip)
@@ -495,16 +737,22 @@ local function HookTooltip(tip)
         if not (bag or slot or invSlot or src) and LinkIsEquipped(link) then
             return
         end
-        if not AddCompareLine(self, link, bag, slot, invSlot, src) then
+        local drawn, pending = AddCompareLine(self, link, bag, slot, invSlot, src)
+        if not drawn or pending then
             StartTipRetry(self, link)
         end
     end)
     tip:HookScript("OnTooltipCleared", function(self)
         self.refactorCompareDone = nil
+        -- The client rebuilt the tooltip's lines: any line this addon added
+        -- to the old render is gone, so the index we remembered for it must
+        -- go too or the next verdict would overwrite an unrelated line.
+        ForgetOwnLines(self)
         HideLineArrow(self)
     end)
     tip:HookScript("OnHide", function(self)
         self.refactorCompareDone = nil
+        ForgetOwnLines(self)
         HideLineArrow(self)
     end)
 end
@@ -519,6 +767,8 @@ HookTooltip(ItemRefTooltip)
 if WorldMapTooltip then HookTooltip(WorldMapTooltip) end
 
 C.SetArrowAtlas = SetArrowAtlas
+C.SpinnerShow = SpinnerShow
+C.SpinnerHide = SpinnerHide
 C.SEC_R = SEC_R
 C.SEC_G = SEC_G
 C.SEC_B = SEC_B

@@ -96,6 +96,15 @@ local function SetHitCapPvP(enabled)
     C.RefreshConfig()
 end
 
+-- Turning scan confirmation on or off changes what every cached scan means
+-- — entries taken under the old rule carry the old rule's idea of "final" —
+-- so the cache is dropped with the setting rather than left to age out.
+RefactorCompareShared.SetScanVerify = function(enabled)
+    RefactorCompareDB.scanVerify = enabled and true or false
+    WipeScanCache()
+    C.RefreshOpenBags()
+end
+
 RefactorCompareShared.SaveProfileAs = SaveProfileAs
 RefactorCompareShared.DeleteProfile = DeleteProfile
 RefactorCompareShared.SetSecondaryProfile = SetSecondaryProfile
@@ -218,6 +227,26 @@ SlashCmdList.REFACTORCOMPARE = function(msg)
         C.RefreshOpenBags()
         C.RefreshConfig()
         Print("profile auto-selection re-enabled (now: '" .. RefactorCompareDB.activeProfile .. "').")
+    elseif cmd == "spinner" then
+        RefactorCompareDB.compareSpinner = not RefactorCompareDB.compareSpinner
+        C.RefreshOpenBags()
+        C.RefreshConfig()
+        Print("loading spinner while comparing "
+            .. (RefactorCompareDB.compareSpinner and "on" or "off") .. ".")
+    elseif cmd == "verify" then
+        RefactorCompareDB.scanVerify = RefactorCompareDB.scanVerify == false
+        -- Every cached scan was taken under the old rule; start clean so the
+        -- change applies to what's already on screen too.
+        WipeScanCache()
+        C.RefreshOpenBags()
+        C.RefreshConfig()
+        if RefactorCompareDB.scanVerify then
+            Print("scan confirmation |cff00ff00on|r — item stats are re-read until two "
+                .. "scans agree before a verdict counts as final.")
+        else
+            Print("scan confirmation |cffff4040off|r — verdicts come from a single "
+                .. "tooltip read, which Ascension's scaled items can render stale.")
+        end
     elseif cmd == "debug" then
         RefactorCompareDB.debug = not RefactorCompareDB.debug
         Print("debug " .. (RefactorCompareDB.debug and "on — hover an item to see red-line detection" or "off") .. ".")
@@ -321,7 +350,7 @@ SlashCmdList.REFACTORCOMPARE = function(msg)
             Print("usage: /rfc profile <name> | save <name> | delete <name> | list")
         end
     else
-        Print("commands: /rfc (config), toggle, alert, bagicons, auto, debug, quality <n>, weight <stat> <n>, hitcap <off|melee|ranged|spell|pvp>, profile ..., secondary <name|off>")
+        Print("commands: /rfc (config), toggle, alert, bagicons, spinner, verify, auto, debug, quality <n>, weight <stat> <n>, hitcap <off|melee|ranged|spell|pvp>, profile ..., secondary <name|off>")
     end
 end
 
@@ -376,9 +405,20 @@ refreshFrame:SetScript("OnUpdate", function(self, elapsed)
     end
 
     -- Bag-only change: a same-link different-instance copy can land in a
-    -- slot whose scan is still cached, so drop just those bags' scans —
-    -- folded into the same pass as the expiry sweep for quest-reward "q:"
-    -- and loot-window "ls:" keys, which no event ever deletes.
+    -- slot whose scan is still cached, so those bags' scans can no longer be
+    -- taken on trust — folded into the same pass as the expiry sweep for
+    -- quest-reward "q:" and loot-window "ls:" keys, which no event ever
+    -- deletes.
+    --
+    -- "Can no longer be trusted" is not the same as "is wrong", and the
+    -- difference is most of a frame's work. Throwing these scans away (what
+    -- this used to do) meant the redraw that follows had to re-render the
+    -- hidden tooltip for every slot in the bag — a hundred of them, in one
+    -- frame, because one item got looted. Instead they're marked
+    -- unconfirmed: the redraw answers from the scans that are already there,
+    -- each slot shows as still-being-checked, and the verifier in
+    -- 03_scan.lua re-renders them a few per tick, quietly correcting only
+    -- the ones whose stats actually moved.
     --
     -- One walk of scanCache instead of one per dirty bag, and the prefix
     -- test is plain strfind rather than k:sub(1, #prefix) == prefix: sub()
@@ -397,16 +437,20 @@ refreshFrame:SetScript("OnUpdate", function(self, elapsed)
     end
 
     for k, v in pairs(scanCache) do
-        local drop = v.expires and v.expires < now
-        if not drop then
+        if v.expires and v.expires < now then
+            scanCache[k] = nil
+        else
             for i = 1, n do
                 if strfind(k, scanPrefixes[i], 1, true) == 1 then
-                    drop = true
+                    -- Falls back to the old drop-it behavior for anything
+                    -- the verifier can't take over (verification disabled,
+                    -- unreadable scan): correctness first, the cheaper path
+                    -- only when it's actually available.
+                    if not C.MarkScanUnconfirmed(k, v) then scanCache[k] = nil end
                     break
                 end
             end
         end
-        if drop then scanCache[k] = nil end
     end
 
     -- Bag-only: equipped gear and weights are unchanged, so the

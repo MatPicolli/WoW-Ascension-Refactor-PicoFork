@@ -14,6 +14,17 @@
 -- gear compare wrong. The same scan also picks up custom Ascension
 -- stats ("+N Something") and flat "Equip:" rating lines.
 --
+-- And one scan isn't enough. An item's stats here are a property of the
+-- copy in your hands, not of its name: they follow the zone it dropped in
+-- and your level, crafted pieces roll random affixes, Worldforged gear
+-- grows with Runes of Ascension, Mystic Enchants rewrite lines under a
+-- link that never changes. The client happily answers the first render of
+-- an instance whose data has gone cold with the BASE item's numbers and
+-- corrects itself a fraction of a second later. So every instance is
+-- scanned repeatedly until two spaced-out reads agree on every stat before
+-- its verdict is treated as final, and the item wears a small spinner
+-- while that's still happening (see 03_scan.lua).
+--
 -- The line parser ports Pawn's algorithm (kill lines that stop at set
 -- lists, "Stamina +5" normalization, separator-splitting of compound
 -- gem/enchant lines, All Stats expansion, active-only socket bonuses,
@@ -39,6 +50,8 @@
 --   /rfc                     open/close the config panel
 --   /rfc toggle              enable/disable the whole feature
 --   /rfc bagicons            toggle the green upgrade arrow on bag item slots
+--   /rfc spinner             toggle the loading spinner shown while comparing
+--   /rfc verify              toggle multi-scan confirmation of item stats
 --   /rfc alert               toggle loot-moment upgrade alerts
 --   /rfc quality <0-5>       minimum item quality to evaluate
 --   /rfc weight <stat> <n>   set a weight (works for scanned custom stats too)
@@ -133,6 +146,14 @@ local DEFAULTS = {
     bagIcons = true,
     secondaryBagArrow = false, -- off by default: blue secondary-verdict arrow on bag icons
     smartEquip = true, -- right-click equip replaces the weaker of a slot pair
+    -- Confirm every item instance with a second, spaced-out scan before
+    -- trusting its numbers (see RefactorCompare/03_scan.lua). On by
+    -- default: nothing about Ascension gear is static enough to take a
+    -- single tooltip render at its word. Turning it off restores the old
+    -- single-look behavior — faster to first arrow, wrong more often.
+    scanVerify = true,
+    -- Small spinner on an item whose comparison is still being confirmed.
+    compareSpinner = true,
     minQuality = 2, -- ignore items below Uncommon so junk doesn't clutter tooltips
     armorTypes = { Cloth = true, Leather = true, Mail = true, Plate = true },
     activeProfile = "Default",

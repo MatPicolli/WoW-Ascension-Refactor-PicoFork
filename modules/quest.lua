@@ -204,6 +204,13 @@ local function BestReward()
                 Dbg("#%d: scored from a bare link, not actionable", i)
                 return nil -- base-item score: not actionable
             end
+            if r.pending then
+                -- Read once, not yet confirmed by a second scan. Taking a
+                -- reward can't be undone, so a number still being checked
+                -- is not one to act on — wait for it to settle.
+                Dbg("#%d: verdict still being confirmed", i)
+                return nil, "wait"
+            end
             if (r.status == "upgrade" or r.status == "empty") and r.gain then
                 if not bestGain or r.gain > bestGain + EPSILON then
                     bestIdx, bestGain, tiedUpgrade = i, r.gain, false

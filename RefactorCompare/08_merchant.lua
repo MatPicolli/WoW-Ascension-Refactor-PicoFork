@@ -2,6 +2,8 @@ local C = RefactorCompareInternal
 local CompareItem = C.CompareItem
 local SLOTS_FOR_INVTYPE = C.SLOTS_FOR_INVTYPE
 local SetArrowAtlas = C.SetArrowAtlas
+local SpinnerShow = C.SpinnerShow
+local SpinnerHide = C.SpinnerHide
 
 --------------------------------------------------------------------------
 -- Vendor/Merchant item upgrade markers
@@ -29,8 +31,11 @@ local function UpdateMerchantArrowsNow()
     if not (RefactorCompareDB and RefactorCompareDB.enabled and RefactorCompareDB.bagIcons and MerchantFrame and MerchantFrame:IsShown()) then
         for i = 1, maxItems do
             local button = _G["MerchantItem" .. i .. "ItemButton"]
-            if button and button.refactorMerchantArrow then
-                button.refactorMerchantArrow:Hide()
+            if button then
+                if button.refactorMerchantArrow then
+                    button.refactorMerchantArrow:Hide()
+                end
+                SpinnerHide(button, "refactorSpinner")
             end
         end
         return true
@@ -43,7 +48,7 @@ local function UpdateMerchantArrowsNow()
     for i = 1, maxItems do
         local button = _G["MerchantItem" .. i .. "ItemButton"]
         if button then
-            local show = false
+            local show, waiting = false, false
             local index = ((page - 1) * maxItems) + i
             local link
             if isBuyback then
@@ -58,11 +63,16 @@ local function UpdateMerchantArrowsNow()
                 name, equipLoc = n, e
                 if not name then
                     complete = false
+                    waiting = true
                 elseif equipLoc and SLOTS_FOR_INVTYPE[equipLoc] then
                     local src = isBuyback and { buybackSlot = index } or { merchantSlot = index }
-                    local result = CompareItem(link, nil, nil, nil, src)
+                    local result, pending = CompareItem(link, nil, nil, nil, src)
                     if not result then
                         complete = false
+                        waiting = pending or false
+                    elseif result.pending then
+                        complete = false
+                        waiting = true
                     elseif not result.approx
                         and (result.status == "upgrade" or result.status == "empty") then
                         show = true
@@ -74,6 +84,11 @@ local function UpdateMerchantArrowsNow()
                 GetMerchantArrow(button):Show()
             elseif button.refactorMerchantArrow then
                 button.refactorMerchantArrow:Hide()
+            end
+            if waiting then
+                SpinnerShow(button, "refactorSpinner", button, "TOPRIGHT", -8, -9)
+            else
+                SpinnerHide(button, "refactorSpinner")
             end
         end
     end

@@ -549,8 +549,16 @@ local function TryResolve(entry)
         end
         if bag then
             local result = shared.CompareItem(link, bag, slot)
+            -- Verdict read but not yet confirmed by a second scan (see the
+            -- confirmation pass in RefactorCompare/03_scan.lua). The toast
+            -- can wait — same budget rule the missing-bag-instance case
+            -- uses above, so a slow item still toasts, just without the
+            -- arrow rather than with a wrong one.
+            if result and result.pending and entry.retries > ARROW_WAIT_RETRIES then
+                return false
+            end
             -- The arrow is a promise, not a hint: estimates never earn it.
-            if result and not result.approx
+            if result and not result.approx and not result.pending
                 and (result.status == "upgrade" or result.status == "empty") then
                 upgrade = { pct = result.pct,
                     empty = result.status == "empty",

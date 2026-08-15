@@ -2,6 +2,8 @@ local C = RefactorCompareInternal
 local Print = C.Print
 local CompareItem = C.CompareItem
 local SetArrowAtlas = C.SetArrowAtlas
+local SpinnerShow = C.SpinnerShow
+local SpinnerHide = C.SpinnerHide
 local SEC_R, SEC_G, SEC_B = C.SEC_R, C.SEC_G, C.SEC_B
 local verdictCache = C.verdictCache
 
@@ -44,20 +46,33 @@ local function GetBagArrow2(button)
 end
 
 local function UpdateArrowForLink(button, link, bag, slot)
-    local show, show2 = false, false
+    local show, show2, waiting = false, false, false
     if link and RefactorCompareDB and RefactorCompareDB.enabled and RefactorCompareDB.bagIcons then
-        local result = CompareItem(link, bag, slot)
+        local result, pending = CompareItem(link, bag, slot)
         -- The arrow is a promise, not a hint: estimates (base-item link
         -- scans, cached other-character slots) never earn it — and the
-        -- secondary (blue) arrow plays by the exact same rule.
-        show = result ~= nil
+        -- secondary (blue) arrow plays by the exact same rule. A verdict
+        -- that hasn't been confirmed by a second scan is an estimate by the
+        -- same standard, so it gets the spinner instead: the corner says
+        -- "still deciding" rather than making a promise it might take back.
+        waiting = pending or (result ~= nil and result.pending) or false
+        show = not waiting
+            and result ~= nil
             and not result.approx
             and (result.status == "upgrade" or result.status == "empty")
         local sec = result and result.secondary
-        show2 = RefactorCompareDB.secondaryBagArrow
+        show2 = not waiting
+            and RefactorCompareDB.secondaryBagArrow
             and sec ~= nil
             and not result.approx
             and (sec.status == "upgrade" or sec.status == "empty")
+    end
+    if waiting then
+        -- Same corner the green arrow uses, so the spinner turning into an
+        -- arrow (or into nothing) reads as the answer landing.
+        SpinnerShow(button, "refactorSpinner", button, "TOPRIGHT", -8, -9)
+    else
+        SpinnerHide(button, "refactorSpinner")
     end
     if show then
         GetBagArrow(button):Show()

@@ -4,6 +4,8 @@ local CompareItem = C.CompareItem
 local ScanItem = C.ScanItem
 local SLOTS_FOR_INVTYPE = C.SLOTS_FOR_INVTYPE
 local SetArrowAtlas = C.SetArrowAtlas
+local SpinnerShow = C.SpinnerShow
+local SpinnerHide = C.SpinnerHide
 
 --------------------------------------------------------------------------
 -- Quest reward markers
@@ -52,6 +54,15 @@ end
 local function HideQuestMarkers(button)
     if button.refactorQuestArrow then button.refactorQuestArrow:Hide() end
     if button.refactorQuestCoin then button.refactorQuestCoin:Hide() end
+    SpinnerHide(button, "refactorSpinner")
+end
+
+-- The spinner rides the same corner as the reward's upgrade arrow, so a
+-- reward still being read shows movement there instead of a blank icon —
+-- worth more here than anywhere else, since picking the wrong reward can't
+-- be undone.
+local function ShowQuestSpinner(button)
+    SpinnerShow(button, "refactorSpinner", QuestItemIcon(button), "TOPRIGHT", -6, -7)
 end
 
 -- QuestInfo_Display fires on every quest-pane redraw, not just when
@@ -105,6 +116,7 @@ local function UpdateQuestRewardsNow()
     local choiceCount = 0
     local bestValue, bestButton = 0, nil
     local arrowFor = {}
+    local spinnerFor = {}
 
     for i = 1, MAX_QUEST_ITEMS do
         local button = _G["QuestInfoItem" .. i]
@@ -130,7 +142,7 @@ local function UpdateQuestRewardsNow()
                 complete = false
             else
                 if equipLoc and SLOTS_FOR_INVTYPE[equipLoc] then
-                    local result = CompareItem(link, nil, nil, nil,
+                    local result, pending = CompareItem(link, nil, nil, nil,
                         { log = qlog, type = button.type, index = idx })
                     if not result then
                         -- Gear without a verdict: usually a scan that
@@ -138,6 +150,13 @@ local function UpdateQuestRewardsNow()
                         -- items land here too; the retry cap keeps that
                         -- harmless.)
                         complete = false
+                        spinnerFor[button] = pending or false
+                    elseif result.pending then
+                        -- Read once, not yet confirmed: no arrow on a
+                        -- reward this consequential until the second scan
+                        -- agrees with the first.
+                        complete = false
+                        spinnerFor[button] = true
                     elseif not result.approx
                         and (result.status == "upgrade" or result.status == "empty") then
                         arrowFor[button] = true
@@ -174,6 +193,11 @@ local function UpdateQuestRewardsNow()
                 GetQuestArrow(button):Show()
             elseif button.refactorQuestArrow then
                 button.refactorQuestArrow:Hide()
+            end
+            if spinnerFor[button] then
+                ShowQuestSpinner(button)
+            else
+                SpinnerHide(button, "refactorSpinner")
             end
             -- Coin marks the most vendor-valuable choice, but the arrow
             -- outranks it: an upgrade beats vendor gold.
@@ -284,7 +308,7 @@ local function UpdateRollFramesNow()
     for i = 1, NUM_ROLL_FRAMES do
         local frame = _G["GroupLootFrame" .. i]
         if frame then
-            local show = false
+            local show, waiting = false, false
             if frame:IsShown() and frame.rollID and RefactorCompareDB and RefactorCompareDB.enabled then
                 local link = GetLootRollItemLink
                     and GetLootRollItemLink(frame.rollID)
@@ -296,15 +320,23 @@ local function UpdateRollFramesNow()
                 end
                 if not name then
                     complete = false
+                    waiting = true
                 else
                     if equipLoc and SLOTS_FOR_INVTYPE[equipLoc] then
-                        local result = CompareItem(link, nil, nil, nil,
+                        local result, pending = CompareItem(link, nil, nil, nil,
                             { roll = frame.rollID })
                         if not result then
-                            -- Scan pending / stale-armor discard: retry.
+                            -- Scan pending / stale-render discard: retry.
                             -- (Quality-filtered gear lands here too; the
                             -- retry cap keeps that harmless.)
                             complete = false
+                            waiting = pending or false
+                        elseif result.pending then
+                            -- Roll windows are the shortest-lived verdict
+                            -- there is and the client feeds them item data
+                            -- late; no arrow until a second scan agrees.
+                            complete = false
+                            waiting = true
                         elseif not result.approx
                             and (result.status == "upgrade"
                                 or result.status == "empty") then
@@ -317,6 +349,12 @@ local function UpdateRollFramesNow()
                 GetRollArrow(frame):Show()
             elseif frame.refactorRollArrow then
                 frame.refactorRollArrow:Hide()
+            end
+            if waiting then
+                SpinnerShow(frame, "refactorSpinner",
+                    _G[frame:GetName() .. "IconFrame"] or frame, "TOPRIGHT", -6, -7)
+            else
+                SpinnerHide(frame, "refactorSpinner")
             end
         end
     end

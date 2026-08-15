@@ -53,15 +53,21 @@ C.MarkNotGear = MarkNotGear
 -- select the real item instance (see ScanItem).
 -- profile defaults to the active profile; the secondary-verdict path passes
 -- its own so one tooltip scan feeds both weighted sums.
+--
+-- Second return is "still working on it": true when this is gear we ought
+-- to be able to judge and simply couldn't yet, false when the answer is
+-- final (not gear at all, or the scan has given up on the item). Callers
+-- turn it into the loading spinner and into their own retry decisions —
+-- an unreadable item must never be mistaken for a settled one.
 local function ScoreItem(link, bag, slot, invSlot, src, profile)
     local name, _, quality, _, reqLevel, itemType, itemSubType, _, equipLoc =
         GetItemInfo(link)
     -- No name = the client hasn't cached this item yet. That is a RETRY, not
     -- a verdict, and must never be recorded as non-gear.
-    if not name then return nil end
+    if not name then return nil, true end
     if not equipLoc or not SLOTS_FOR_INVTYPE[equipLoc] then
         MarkNotGear(link)
-        return nil
+        return nil, false
     end
 
     profile = profile or ActiveProfile()
@@ -70,7 +76,9 @@ local function ScoreItem(link, bag, slot, invSlot, src, profile)
     local score = 0
 
     local scan = ScanItem(link, bag, slot, invSlot, src)
-    if scan.failed then return nil end -- no data: no verdict, never a guess
+    -- No data: no verdict, never a guess. Worth retrying unless the scan
+    -- has already exhausted its attempts on this item.
+    if scan.failed then return nil, not scan.giveUp end
     local hitAmount = 0 -- raw hit rating on the item, for the hit-cap correction
     for statName, amount in pairs(scan.stats) do
         local key = STAT_NAME_KEYS[statName]
@@ -120,7 +128,10 @@ local function ScoreItem(link, bag, slot, invSlot, src, profile)
         -- Scored from a bare link = base item, not the scaled copy in
         -- hand. Ascension scaling makes that an estimate at best.
         approx = not scan.instance,
-    }
+        -- Read once, not yet read twice: the numbers behind this score are
+        -- provisional until the scan confirms them (see 03_scan.lua).
+        pending = scan.pending,
+    }, scan.pending
 end
 
 -- Score of what's equipped in a slot: a number, nil when the slot is
@@ -129,10 +140,12 @@ end
 -- silent — never as an empty slot begging to be filled. Second return is
 -- the weapon-DPS share of the score (nil unless the slot holds a weapon),
 -- for the offhand discount in the 2H comparison. Third return is the item's
--- raw hit rating (for the hit-cap correction in VerdictForProfile). profile
--- defaults to the active profile; the secondary verdict passes its own and
--- gets its own memo fields (score2/dpsScore2/hit2) so the two never poison
--- each other.
+-- raw hit rating (for the hit-cap correction in VerdictForProfile). Fourth
+-- is true while the worn item's own scan is still unconfirmed — the
+-- baseline is as provisional as the candidate, and a verdict is only as
+-- trustworthy as the weaker of its two sides. profile defaults to the
+-- active profile; the secondary verdict passes its own and gets its own
+-- memo fields (score2/dpsScore2/hit2) so the two never poison each other.
 local function ScoreEquipped(slot, profile)
     local link = GetInventoryItemLink("player", slot)
     if not link then return nil end
@@ -154,6 +167,13 @@ local function ScoreEquipped(slot, profile)
     end
     local info = ScoreItem(link, nil, nil, slot, nil, profile)
     if not info then return false end -- unreadable: retry next call, never memoized
+    -- Provisional scores are never memoized either. The memo lives until the
+    -- generation moves, and pinning a "still checking" score there would
+    -- outlast the check itself — the item would read as pending long after
+    -- it settled, and the settled numbers would never replace it.
+    if info.pending then
+        return info.score, info.dpsScore, info.hit, true
+    end
     if memoHit then
         if secondary then
             c.score2, c.dpsScore2, c.hitAmt2 = info.score, info.dpsScore, info.hit
@@ -300,6 +320,10 @@ local function VerdictForProfile(info, profile)
     -- ScoreEquipped's middle return into it, and without a local of that name
     -- in scope that assignment wrote to the GLOBAL _ on every comparison.
     local equippedScore, equippedHit, context, _
+    -- True while either side of the comparison is still being confirmed.
+    -- Seeded from the candidate item and joined with whatever the equipped
+    -- side reports below, so one flag answers "is this number final?".
+    local pending = info.pending or false
     -- profile may be nil (primary verdict = active profile); resolve it for
     -- the hit-cap correction, which needs the real weights/hitCap table.
     local capProfile = profile or ActiveProfile()
@@ -309,18 +333,25 @@ local function VerdictForProfile(info, profile)
         local ns = ApplyHitCap(capProfile, info.score, info.hit, 0, 0)
         return ns
     end
+    -- Every early return below carries the same three flags; building them
+    -- in one place keeps a new field from being forgotten on one path.
+    local function emptyResult()
+        return { status = "empty", gain = emptyNewScore(),
+            levelLocked = info.levelLocked, approx = info.approx,
+            pending = pending or nil }
+    end
 
     if info.equipLoc == "INVTYPE_2HWEAPON" then
         -- A two-hander replaces everything you're holding: compare against
         -- main hand + off hand combined, the offhand's weapon DPS at the
         -- dual-wield penalty factor (shields/holdables have no DPS share
         -- and keep full value).
-        local mh, _, mhHit = ScoreEquipped(16, profile)
-        local oh, ohDps, ohHit = ScoreEquipped(17, profile)
+        local mh, _, mhHit, mhPend = ScoreEquipped(16, profile)
+        local oh, ohDps, ohHit, ohPend = ScoreEquipped(17, profile)
         if mh == false or oh == false then return nil end
+        pending = pending or mhPend or ohPend or false
         if not mh and not oh then
-            return { status = "empty", gain = emptyNewScore(),
-                levelLocked = info.levelLocked, approx = info.approx }
+            return emptyResult()
         end
         equippedScore = (mh or 0) + (oh or 0)
         equippedHit = (mhHit or 0) + (ohHit or 0)
@@ -336,8 +367,10 @@ local function VerdictForProfile(info, profile)
             or info.equipLoc == "INVTYPE_SHIELD") then
         -- Anything held while a 2H is equipped means giving up the 2H, so
         -- that's what it has to beat.
-        equippedScore, _, equippedHit = ScoreEquipped(16, profile)
+        local mhPend
+        equippedScore, _, equippedHit, mhPend = ScoreEquipped(16, profile)
         if equippedScore == false then return nil end
+        pending = pending or mhPend or false
         context = "vs equipped 2H"
     else
         local slots = SLOTS_FOR_INVTYPE[info.equipLoc]
@@ -349,11 +382,11 @@ local function VerdictForProfile(info, profile)
         -- the weaker of the equipped items, since that's what you'd replace.
         local weakerSlot
         for _, slot in ipairs(slots) do
-            local s, _, sHit = ScoreEquipped(slot, profile)
+            local s, _, sHit, sPend = ScoreEquipped(slot, profile)
             if s == false then return nil end
+            pending = pending or sPend or false
             if not s then
-                return { status = "empty", gain = emptyNewScore(),
-                    levelLocked = info.levelLocked, approx = info.approx }
+                return emptyResult()
             end
             if not equippedScore or s < equippedScore then
                 equippedScore, equippedHit, weakerSlot = s, sHit, slot
@@ -369,8 +402,7 @@ local function VerdictForProfile(info, profile)
     end
 
     if not equippedScore then
-        return { status = "empty", gain = emptyNewScore(),
-            levelLocked = info.levelLocked, approx = info.approx }
+        return emptyResult()
     end
 
     -- Both sides readable: re-score the HIT term against the cap before
@@ -391,14 +423,16 @@ local function VerdictForProfile(info, profile)
         if newScore > 0 then
             return { status = "empty", zeroBaseline = true, context = context,
                 gain = newScore,
-                levelLocked = info.levelLocked, approx = info.approx }
+                levelLocked = info.levelLocked, approx = info.approx,
+                pending = pending or nil }
         end
         -- BOTH sides score nothing: not parity — this profile simply has no
         -- weights for anything on either item. zeroAll marks it so renderers
         -- say "No value" instead of a misleading "0%".
         return { status = "even", pct = 0, zeroAll = true, context = context,
             gain = 0,
-            levelLocked = info.levelLocked, approx = info.approx }
+            levelLocked = info.levelLocked, approx = info.approx,
+            pending = pending or nil }
     end
 
     local pct = (newScore - equippedScore) / equippedScore * 100
@@ -412,7 +446,8 @@ local function VerdictForProfile(info, profile)
 
     return { status = status, pct = pct, context = context,
         gain = newScore - equippedScore,
-        levelLocked = info.levelLocked, approx = info.approx }
+        levelLocked = info.levelLocked, approx = info.approx,
+        pending = pending or nil }
 end
 
 -- Core comparison. Returns nil (nothing to show — including any side we
@@ -422,34 +457,45 @@ end
 --   context = optional extra text, e.g. "vs main + off hand"
 --   approx  = true when scored from a bare link (base item, not the
 --             scaled instance): display as estimate, never as bag arrow
+--   pending = true while either side is still being confirmed by a second
+--             scan: the verdict is usable but provisional, and the caller
+--             should show it as still loading (and keep retrying)
 --   secondary = the secondary profile's verdict table (same shape), when a
 --             secondary profile is configured. Never attached for the
 --             profile-independent statuses (unusable/wrongarmor); a side
 --             that can't be read kills only the secondary verdict, never
 --             the primary one.
 -- (Wrapped by CompareItem below, which memoizes bag-slot results.)
+-- Second return mirrors result.pending, and also answers for the cases
+-- where there is no result at all: true means "gear we couldn't read yet,
+-- ask again", false/nil means the absence is final (not gear, filtered out,
+-- or the scan gave up).
 local function CompareItemUncached(link, bag, slot, invSlot, src)
-    local info = ScoreItem(link, bag, slot, invSlot, src)
-    if not info then return nil end
-    if info.quality < (RefactorCompareDB.minQuality or 0) then return nil end
+    local info, pending = ScoreItem(link, bag, slot, invSlot, src)
+    if not info then return nil, pending end
+    if info.quality < (RefactorCompareDB.minQuality or 0) then return nil, false end
 
     -- Level requirement is deliberately NOT checked via GetItemInfo():
     -- Ascension scales items, and GetItemInfo() reports the base item's
     -- required level, not the scaled one on your actual copy. The tooltip
     -- scan handles it instead — the client renders any requirement you
     -- don't meet (level, proficiency, class) in red.
+    -- Structural answers, not scored ones: whether you can equip an item at
+    -- all and what armor class it is don't depend on the scaled numbers, so
+    -- they're final the first time they're read and never show as loading.
     if info.unusable then
-        return { status = "unusable", context = info.unusableReason }
+        return { status = "unusable", context = info.unusableReason }, false
     end
 
     if ARMOR_FILTERED_INVTYPES[info.equipLoc]
         and info.itemType == "Armor"
         and RefactorCompareDB.armorTypes[info.itemSubType] == false then
-        return { status = "wrongarmor", context = info.itemSubType }
+        return { status = "wrongarmor", context = info.itemSubType }, false
     end
 
     local result = VerdictForProfile(info)
-    if not result then return nil end
+    -- nil here means a side we couldn't read — always worth another look.
+    if not result then return nil, true end
 
     -- Secondary (blue) verdict: same tooltip scan, second weighted sum —
     -- ScanItem is weight-independent and cached, so this costs one
@@ -462,7 +508,7 @@ local function CompareItemUncached(link, bag, slot, invSlot, src)
         end
     end
 
-    return result
+    return result, result.pending or false
 end
 
 -- Bag-slot lookups are the hot path: every open bag re-evaluates every
@@ -474,20 +520,26 @@ end
 local function CompareItem(link, bag, slot, invSlot, src)
     -- Checked before the cache key is built: for a non-gear link this turns
     -- the whole call into one table lookup and no allocation.
-    if notGear[link] then return nil end
+    if notGear[link] then return nil, false end
     if bag ~= nil and slot ~= nil and invSlot == nil and src == nil then
         local key = bag .. ":" .. slot .. ":" .. link
         local hit = verdictCache[key]
-        if hit and hit.gen == C.generation then return hit.result end
-        local result = CompareItemUncached(link, bag, slot)
+        if hit and hit.gen == C.generation then return hit.result, false end
+        local result, pending = CompareItemUncached(link, bag, slot)
         -- Only cache fully-resolved results: with a secondary profile set,
         -- a missing .secondary half means its equipped side wasn't readable
         -- yet — caching that would pin the verdict half-drawn until the
         -- next generation bump instead of retrying like a nil result does.
-        if result and (result.secondary or not SecondaryProfile()) then
+        -- A provisional verdict is held out for the same reason: the memo
+        -- outlives the confirmation it is waiting on, so caching one would
+        -- freeze the unconfirmed number in place until the next generation
+        -- bump — spinner and all — and the confirmed reading would never
+        -- get to replace it.
+        if result and not result.pending
+            and (result.secondary or not SecondaryProfile()) then
             verdictCache[key] = { gen = C.generation, result = result }
         end
-        return result
+        return result, pending
     end
     return CompareItemUncached(link, bag, slot, invSlot, src)
 end
@@ -602,9 +654,13 @@ do
         local linkA = GetInventoryItemLink("player", slots[1])
         local linkB = GetInventoryItemLink("player", slots[2])
         if not linkA or not linkB then return end -- empty slot: engine fills it
-        local sa = ScoreEquipped(slots[1])
-        local sb = ScoreEquipped(slots[2])
+        local sa, _, _, pa = ScoreEquipped(slots[1])
+        local sb, _, _, pb = ScoreEquipped(slots[2])
         if type(sa) ~= "number" or type(sb) ~= "number" then return end
+        -- A provisional score is not a basis for moving the player's gear
+        -- around. Same hands-off rule as an unreadable one: let the engine's
+        -- default pick stand rather than act on a number still being checked.
+        if pa or pb then return end
         if sa == sb then return end -- either is fine, leave the engine to it
         se = {
             bag = bag, slot = slot, slots = slots,

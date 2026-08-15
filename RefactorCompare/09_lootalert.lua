@@ -127,7 +127,7 @@ RefactorCompareShared = {
     end,
 }
 
-local function TryAlert(link)
+local function TryAlert(link, retriesLeft)
     -- Junk/materials can never alert: done immediately, no bag walk, no
     -- compare. (The old code retried those for the full budget.) nil =
     -- item data not client-cached yet — that's what the retries are for.
@@ -138,6 +138,13 @@ local function TryAlert(link)
     local result = CompareItem(link, bag, slot)
     if not (bag and slot) and (result == nil or result.approx) then
         return false -- not in bags / not cached yet, worth retrying
+    end
+    -- Verdict read once but not yet confirmed by a second scan: "worth
+    -- keeping!" is a claim, so spend a retry on getting it right. Only
+    -- while there are retries to spare — the last attempt says its piece
+    -- with what it has rather than going silent.
+    if result and result.pending and (retriesLeft or 0) > 1 then
+        return false
     end
     -- Alert only from a real instance scan: a base-link estimate isn't
     -- worth telling the player to keep something.
@@ -166,7 +173,7 @@ alertFrame:SetScript("OnUpdate", function(self, elapsed)
     alertElapsed = 0
     local remaining = 0
     for link, retries in pairs(pendingAlerts) do
-        if TryAlert(link) or retries <= 1 then
+        if TryAlert(link, retries) or retries <= 1 then
             pendingAlerts[link] = nil
         else
             pendingAlerts[link] = retries - 1
@@ -184,7 +191,7 @@ local function OnLootMessage(msg)
         if itemString then
             local link = itemString:match("|Hitem:.-|h%[.-%]|h")
             if link then
-                if wantAlert and not TryAlert(link) then
+                if wantAlert and not TryAlert(link, 3) then
                     pendingAlerts[link] = 3
                     alertElapsed = 0
                     alertFrame:Show()
