@@ -20,6 +20,18 @@ The core feature. Assign your own weight to every stat (Strength, Agility, Crit,
 - Correctly handles Ascension's **item scaling**: because Ascension scales item instances server-side (two copies of the same item link can have different stats), Refactor scans the *live* tooltip instead of trusting the item link — so verdicts are always accurate for the item actually in your bag, not some generic base version.
 - Never guesses: if an item can't be scanned (not cached client-side, hard requirement not met, etc.), no verdict is shown rather than a misleading one.
 
+#### Nothing here has fixed stats, so nothing is read only once
+
+An item's stats on Ascension belong to your copy of it, not to its name — they follow the zone it dropped in and your level, crafted pieces roll random affixes, Worldforged gear grows with Runes of Ascension, and Mystic Enchants rewrite lines under a link that never changes. Worse, the client will answer the first tooltip render of an item whose data has gone cold with the *base* item's numbers, then quietly correct itself a fraction of a second later — which is how a real downgrade briefly paints as a +21% upgrade.
+
+So Refactor treats a scan as a sample, not an answer:
+
+- **Every item instance is read repeatedly until two spaced-out scans agree** on every stat, DPS value, socket and level line before its verdict counts as final. A render that comes back looking exactly like the base item is thrown out on sight rather than scored.
+- **Until then the item shows a small spinner** where its upgrade arrow goes — on bag slots, vendor and quest-reward icons, roll frames, and beside the verdict on the tooltip. The tooltip still shows its provisional percentage while checking (it's right the vast majority of the time); arrows, loot alerts and the quest reward auto-pick wait for confirmation, since those are promises rather than hints.
+- **It costs less, not more.** Confirmed items are trusted three times longer than before, and a bag change no longer throws away every scan in that bag — it re-checks them a few per tick in the background instead of re-rendering a hundred hidden tooltips in a single frame.
+
+Both halves are toggleable on the General page (or `/rfc verify` and `/rfc spinner`).
+
 ### 🏆 Class & Spec Profiles
 - Auto-detects your class and primary talent spec and seeds a matching profile with community-sourced default weights the first time you log in
 - Switch, save, and manage multiple named weight profiles per character
@@ -79,7 +91,9 @@ To undo everything, run `uninstall-silent-fizzles.cmd` from the same folder and 
 |---|---|
 | `/refactor` or `/rfc` | Open the Refactor config window |
 | `/rfc auto` | Resume automatic spec-based profile selection |
-| `/rfc debug` | Print tooltip-scan debug info on hover |
+| `/rfc verify` | Toggle multi-scan confirmation of item stats |
+| `/rfc spinner` | Toggle the loading animation shown while comparing |
+| `/rfc debug` | Print tooltip-scan debug info on hover (sample count, agreement, confirmed/pending) |
 
 Loot toast on/off, anchor position, and a preview toast are all on the **Loot** page of the config window.
 
@@ -119,6 +133,19 @@ You can also open the config window from the **minimap button** — left-click t
 
 - Client: WotLK 3.3.5 (Interface 30300), Ascension-specific build
 - Bag addon support: works with the default Blizzard container frames, and hooks item slots directly for Bagnon, DragonUI's bundled Combuctor bags, AdiBags, and ElvUI if installed
+
+## Tests
+
+The timing-dependent parts of the gear comparison (the scan-confirmation
+state machine, the loading spinner) have headless tests that run against a
+mock 3.3.5 client — controllable clock, scriptable tooltip renders, a frame
+loop. From the addon folder, with any Lua 5.1:
+
+```
+lua5.1 tests/test_verify.lua
+```
+
+The `tests/` folder isn't listed in `Refactor.toc`, so it never loads in-game.
 
 ## Contributing
 

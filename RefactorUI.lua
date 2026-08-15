@@ -1028,6 +1028,35 @@ local function BuildGeneralPage()
         function(v) DB().secondaryBagArrow = v; RefreshBags() end))
     y = y - 28
 
+    p:Track(MakeCheck(p, 0, y, CONTENT_W, "Confirm item stats with a second scan",
+        "Ascension gear has no fixed stats — scaling, affixes, Worldforged " ..
+        "upgrades and Mystic Enchants all change what a link is worth, and the " ..
+        "client's first tooltip render of an item often shows the base item's " ..
+        "numbers before correcting itself. With this on, an item is re-read " ..
+        "until two scans agree before its verdict is final, which is what stops " ..
+        "a downgrade from briefly painting as an upgrade. Off is faster to the " ..
+        "first arrow and wrong more often.",
+        function() return DB().scanVerify ~= false end,
+        function(v)
+            local s = CS()
+            if s and s.SetScanVerify then
+                s.SetScanVerify(v)
+            else
+                DB().scanVerify = v
+                RefreshBags()
+            end
+        end))
+    y = y - 28
+
+    p:Track(MakeCheck(p, 0, y, CONTENT_W, "Loading animation while comparing",
+        "Turns a small spinner on an item whose comparison is still being " ..
+        "confirmed — in the same corner the upgrade arrow uses, so the spinner " ..
+        "becoming an arrow is the answer landing. Only appears when a " ..
+        "comparison actually takes a moment; settled bags show nothing.",
+        function() return DB().compareSpinner ~= false end,
+        function(v) DB().compareSpinner = v; RefreshBags() end))
+    y = y - 28
+
     p:Track(MakeCheck(p, 0, y, CONTENT_W, "Smart equip rings, trinkets and weapons",
         "Right-click equip replaces the weaker of the two equipped items " ..
         "under current weights, instead of always the first slot. Needs " ..
