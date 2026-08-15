@@ -10,15 +10,20 @@ local Print = C.Print
 -- Class/spec default weights
 --------------------------------------------------------------------------
 
--- Per-class, per-spec default weights (Ascension's 22 classless "classes",
--- each with 3-4 talent-tree specs). Keyed by the non-localized class token
--- (UnitClass's 2nd return) -> ordered list of { name = spec name (talent
--- tab name, as returned by GetTalentTabInfo), weights = STATS-key weight
--- table }. These seed a per-class-spec profile the first time it's seen
--- (see AutoApplyClassSpec below); they never overwrite a profile that
+-- Per-class, per-spec default weights, keyed by the non-localized class
+-- token (UnitClass's 2nd return) -> ordered list of { name = spec name
+-- (talent tab name, as returned by GetTalentTabInfo), weights = STATS-key
+-- weight table }. These seed a per-class-spec profile the first time it's
+-- seen (see AutoApplyClassSpec below); they never overwrite a profile that
 -- already exists, so editing the weights or spinning off a custom profile
 -- sticks. The first entry in each list also serves as the placeholder
 -- default before level 10, when no spec has been chosen yet.
+--
+-- Two rosters live here: Ascension's 21 Conquest of Azeroth classes below,
+-- and the ten original WotLK classes in CLASSIC_CLASS_SPEC_WEIGHTS further
+-- down. They're kept in separate literals purely so each stays readable —
+-- they merge into one table before anything looks at it, and every lookup,
+-- the spec picker and "reset to defaults" treat them identically.
 local CLASS_SPEC_WEIGHTS = {
     BARBARIAN = {
         { name = "Headhunting", weights = { AGI = 1.473, CRIT = 0.65, HASTE = 0.6, DPS = 14, AP = 1, ARP = 0.45, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
@@ -135,6 +140,113 @@ local CLASS_SPEC_WEIGHTS = {
     },
 }
 
+-- The original ten WotLK classes, for characters that aren't on a Conquest
+-- of Azeroth realm — CoA replaces the classic roster outright, but the rest
+-- of Ascension (and any other 3.3.5 client this addon is dropped into)
+-- still runs Warriors and Mages. Until now none of them were listed here,
+-- so DetectPrimarySpec's third source — the stock GetTalentTabInfo loop,
+-- written for exactly these classes — had nothing it could ever match, and
+-- a classic character fell through to the flat generic defaults.
+--
+-- Spec names are the enUS talent tab names GetTalentTabInfo returns, since
+-- that's what auto-detection compares against.
+--
+-- Weights follow the same scale as the CoA entries above: one point of
+-- attack power (physical) or spell power (casters) is the unit, so primary
+-- stats land near their AP/SP conversion, weapon DPS carries the big
+-- DPS = 14, and SOCKET/UNKNOWN keep the house values. Ratings are Wrath
+-- values rather than the flat 0.5 the CoA tables use for hit and expertise:
+-- in 3.3.5 both are worth about as much as crit right up to their caps and
+-- nothing past them, which is what the per-profile hit cap
+-- (/rfc hitcap, Stat Weights page) is there to express — turn it on and the
+-- HIT weight below is applied only up to the cap.
+--
+-- Two trees can't be read as a role from their name alone, since 3.3.5 has
+-- one tab covering both: a Feral druid is a cat or a bear, and a Death
+-- Knight tanks out of whichever tree it likes. Those get an extra
+-- manual-pick entry ("Feral Tank", "Tank") that auto-detection never
+-- chooses — pick it once from the spec list on the Stat Weights page and it
+-- sticks, the same way any deliberate profile choice does.
+local CLASSIC_CLASS_SPEC_WEIGHTS = {
+    DEATHKNIGHT = {
+        { name = "Blood",  weights = { STR = 2.3, AGI = 0.35, STA = 0.3, CRIT = 0.75, HIT = 1.1, HASTE = 0.7, DPS = 14, AP = 1, ARP = 0.85, EXP = 1, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        { name = "Frost",  weights = { STR = 2.25, AGI = 0.35, STA = 0.3, CRIT = 0.75, HIT = 1.15, HASTE = 0.8, DPS = 14, AP = 1, ARP = 0.6, EXP = 1, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        { name = "Unholy", weights = { STR = 2.3, AGI = 0.35, STA = 0.3, CRIT = 0.7, HIT = 1.1, HASTE = 0.9, DPS = 14, AP = 1, ARP = 0.7, EXP = 0.95, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        -- Manual pick: any of the three trees can tank, so no tab name
+        -- identifies one. No block rating — Death Knights can't block.
+        { name = "Tank",   weights = { STR = 1.4, AGI = 1.1, STA = 2.2, CRIT = 0.3, HIT = 0.7, HASTE = 0.3, DPS = 8, AP = 0.5, ARP = 0.15, EXP = 0.9, ARMOR = 0.4, DEF = 1.4, DODGE = 1.1, PARRY = 1, SOCKET = 20, UNKNOWN = 0.1 } },
+    },
+    DRUID = {
+        { name = "Balance",       weights = { INT = 1, SPI = 0.4, CRIT = 0.65, HIT = 1.3, HASTE = 0.9, SP = 1, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        { name = "Feral_Combat",  weights = { STR = 1.1, AGI = 1.6, STA = 0.3, CRIT = 0.75, HIT = 1, HASTE = 0.5, DPS = 14, AP = 1, ARP = 1, EXP = 0.9, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        -- Manual pick: same talent tab as the cat above. Bears take crit
+        -- immunity from talents rather than Defense, so defense rating is
+        -- worth nothing to them, they can't parry or block, and armor is
+        -- their headline stat.
+        { name = "Feral_Tank",    weights = { STR = 1, AGI = 1.5, STA = 2.2, CRIT = 0.35, HIT = 0.7, HASTE = 0.3, DPS = 8, AP = 0.5, ARP = 0.2, EXP = 0.8, ARMOR = 0.5, DEF = 0, DODGE = 1.1, SOCKET = 20, UNKNOWN = 0.1 } },
+        { name = "Restoration",   weights = { INT = 1, SPI = 0.55, CRIT = 0.45, HASTE = 0.95, MP5 = 0.85, SP = 1, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+    },
+    HUNTER = {
+        { name = "Beast_Mastery", weights = { AGI = 1.55, STA = 0.2, INT = 0.15, CRIT = 0.7, HIT = 1, HASTE = 0.7, DPS = 14, AP = 1, ARP = 0.7, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        { name = "Marksmanship",  weights = { AGI = 1.5, INT = 0.15, CRIT = 0.75, HIT = 1, HASTE = 0.8, DPS = 14, AP = 1, ARP = 0.95, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        { name = "Survival",      weights = { AGI = 1.6, INT = 0.15, CRIT = 0.7, HIT = 1, HASTE = 0.75, DPS = 14, AP = 1, ARP = 0.6, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+    },
+    MAGE = {
+        { name = "Arcane", weights = { INT = 1, SPI = 0.25, CRIT = 0.6, HIT = 1.3, HASTE = 0.85, SP = 1, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        { name = "Fire",   weights = { INT = 1, SPI = 0.2, CRIT = 0.85, HIT = 1.3, HASTE = 0.9, SP = 1, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        { name = "Frost",  weights = { INT = 1, SPI = 0.2, CRIT = 0.7, HIT = 1.25, HASTE = 0.9, SP = 1, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+    },
+    PALADIN = {
+        { name = "Holy",        weights = { INT = 1, SPI = 0.35, CRIT = 0.55, HASTE = 0.8, MP5 = 0.9, SP = 1, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        -- Spell power feeds Shield of Righteousness and Holy Shield, so a
+        -- protection paladin is the one tank that wants some of it.
+        { name = "Protection",  weights = { STR = 1.3, AGI = 0.9, STA = 2.2, INT = 0.25, CRIT = 0.3, HIT = 0.6, HASTE = 0.3, DPS = 7, AP = 0.45, SP = 0.35, ARP = 0.15, EXP = 0.8, ARMOR = 0.4, DEF = 1.4, DODGE = 1, PARRY = 0.95, BLOCK = 0.95, SOCKET = 20, UNKNOWN = 0.1 } },
+        { name = "Retribution", weights = { STR = 2.3, AGI = 0.5, STA = 0.3, CRIT = 0.8, HIT = 1.1, HASTE = 0.85, DPS = 14, AP = 1, SP = 0.4, ARP = 0.6, EXP = 0.95, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+    },
+    PRIEST = {
+        { name = "Discipline", weights = { INT = 1, SPI = 0.4, CRIT = 0.6, HASTE = 0.8, MP5 = 0.85, SP = 1, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        { name = "Holy",       weights = { INT = 1, SPI = 0.65, CRIT = 0.6, HASTE = 0.85, MP5 = 0.85, SP = 1, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        -- Spirit converts to spell power for shadow (Twisted Faith), which
+        -- is why it outweighs Intellect here.
+        { name = "Shadow",     weights = { INT = 0.35, SPI = 0.6, CRIT = 0.7, HIT = 1.3, HASTE = 1, SP = 1, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+    },
+    ROGUE = {
+        { name = "Assassination", weights = { STR = 0.6, AGI = 1.6, CRIT = 0.9, HIT = 1.2, HASTE = 0.85, DPS = 14, AP = 1, ARP = 0.5, EXP = 0.9, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        { name = "Combat",        weights = { STR = 0.6, AGI = 1.5, CRIT = 0.85, HIT = 1.25, HASTE = 1, DPS = 14, AP = 1, ARP = 1, EXP = 1.05, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        { name = "Subtlety",      weights = { STR = 0.6, AGI = 1.6, CRIT = 0.9, HIT = 1.15, HASTE = 0.8, DPS = 14, AP = 1, ARP = 0.6, EXP = 0.85, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+    },
+    SHAMAN = {
+        { name = "Elemental",   weights = { INT = 1, SPI = 0.25, CRIT = 0.7, HIT = 1.3, HASTE = 0.85, MP5 = 0.2, SP = 1, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        { name = "Enhancement", weights = { STR = 1, AGI = 1.5, INT = 0.35, CRIT = 0.8, HIT = 1.3, HASTE = 0.95, DPS = 14, AP = 1, SP = 0.5, ARP = 0.5, EXP = 0.9, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        { name = "Restoration", weights = { INT = 1, SPI = 0.5, CRIT = 0.45, HASTE = 0.9, MP5 = 0.9, SP = 1, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+    },
+    WARLOCK = {
+        -- Intellect is worth noticeably less than spell power to a warlock
+        -- (no mana troubles, weak crit conversion), unlike a mage.
+        { name = "Affliction",  weights = { INT = 0.6, SPI = 0.35, CRIT = 0.6, HIT = 1.35, HASTE = 0.95, SP = 1, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        { name = "Demonology",  weights = { INT = 0.7, SPI = 0.3, CRIT = 0.75, HIT = 1.3, HASTE = 0.9, SP = 1, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        { name = "Destruction", weights = { INT = 0.7, SPI = 0.25, CRIT = 0.85, HIT = 1.3, HASTE = 0.85, SP = 1, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+    },
+    WARRIOR = {
+        { name = "Arms",       weights = { STR = 2.2, AGI = 0.4, STA = 0.3, CRIT = 0.85, HIT = 1, HASTE = 0.55, DPS = 14, AP = 1, ARP = 1.1, EXP = 0.95, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        -- Dual wielding misses far more often, so fury wants more hit than
+        -- any other melee spec.
+        { name = "Fury",       weights = { STR = 2.2, AGI = 0.4, STA = 0.3, CRIT = 0.8, HIT = 1.2, HASTE = 0.7, DPS = 14, AP = 1, ARP = 0.9, EXP = 0.9, ARMOR = 0.01, SOCKET = 20, UNKNOWN = 0.1 } },
+        { name = "Protection", weights = { STR = 1.4, AGI = 1.3, STA = 2.2, CRIT = 0.3, HIT = 0.6, HASTE = 0.3, DPS = 8, AP = 0.5, ARP = 0.15, EXP = 0.8, ARMOR = 0.4, DEF = 1.4, DODGE = 1.1, PARRY = 1, BLOCK = 0.8, SOCKET = 20, UNKNOWN = 0.1 } },
+    },
+}
+
+-- One roster from here on. Death Knight is the only class whose token
+-- (DEATHKNIGHT) doesn't match what NormalizeClassKey makes of its display
+-- name ("Death Knight" -> DEATH_KNIGHT), and both spellings are used as
+-- lookup keys: GetClassSpecList tries the token, while "reset to defaults"
+-- and profile renaming re-derive the key from the profile name's class
+-- half. Registering both keeps every one of those paths hitting.
+for classKey, specs in pairs(CLASSIC_CLASS_SPEC_WEIGHTS) do
+    CLASS_SPEC_WEIGHTS[classKey] = specs
+end
+CLASS_SPEC_WEIGHTS.DEATH_KNIGHT = CLASS_SPEC_WEIGHTS.DEATHKNIGHT
+
 -- Which armor types each class can wear (server-side rule, unrelated to
 -- talent-spec stat weights — a class's DPS spec can favor Agility while
 -- still only wearing leather). Same keys as CLASS_SPEC_WEIGHTS. Used by
@@ -162,7 +274,24 @@ local ARMOR_TYPES_BY_CLASS = {
     STORMBRINGER      = { "Cloth" },
     CULTIST           = { "Plate", "Cloth" },
     SUN_CLERIC        = { "Plate", "Cloth" },
+
+    -- The original ten. Same two-tier shape as above: the type the class
+    -- wears at max level, plus the lighter one it trains out of on the way
+    -- there (and can still equip), so leveling gear isn't filtered away.
+    WARRIOR      = { "Plate", "Mail" },
+    PALADIN      = { "Plate", "Mail" },
+    DEATHKNIGHT  = { "Plate", "Mail" },
+    HUNTER       = { "Mail", "Leather" },
+    SHAMAN       = { "Mail", "Leather" },
+    ROGUE        = { "Leather", "Cloth" },
+    DRUID        = { "Leather", "Cloth" },
+    PRIEST       = { "Cloth" },
+    MAGE         = { "Cloth" },
+    WARLOCK      = { "Cloth" },
 }
+-- Matches the CLASS_SPEC_WEIGHTS alias: AutoApplyClassSpec indexes this
+-- with whichever key GetClassSpecList matched on.
+ARMOR_TYPES_BY_CLASS.DEATH_KNIGHT = ARMOR_TYPES_BY_CLASS.DEATHKNIGHT
 
 -- CLASS_SPEC_WEIGHTS is keyed by the non-localized class token (UnitClass's
 -- 2nd return), guessed as the usual Blizzard convention (uppercase, spaces
@@ -203,7 +332,9 @@ end
 --    is the chosen CoA spec.
 -- 2. C_CharacterAdvancement — sum learned talent ranks per tree tab and
 --    take the fullest tab (same "most points spent" rule as stock).
--- 3. Stock GetTalentTabInfo loop (vanilla classes / plain 3.3.5).
+-- 3. Stock GetTalentTabInfo loop — the ten original classes, on Ascension
+--    realms that still have them or on a plain 3.3.5 client. This is the
+--    source their entries in CLASSIC_CLASS_SPEC_WEIGHTS are named for.
 --
 -- Ties keep whichever tab was checked first. The list is empty when
 -- nothing has a spec or points yet (pre level 10).

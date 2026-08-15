@@ -4,7 +4,7 @@ A World of Warcraft addon for **[Ascension](https://ascension.gg)**, a custom cl
 
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-F16061?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/profetgit)
 
-> Built specifically for Ascension's Conquest of Azeroth system: 21 classes × 3-4 talent specs, each with hand-tuned default stat weights, plus support for Ascension's server-side item scaling that most gear-scoring addons don't account for.
+> Built specifically for Ascension's Conquest of Azeroth system: 21 classes × 3-4 talent specs, each with hand-tuned default stat weights — plus the ten original WotLK classes for characters off CoA — and support for Ascension's server-side item scaling that most gear-scoring addons don't account for.
 
 ---
 
@@ -34,6 +34,8 @@ Both halves are toggleable on the General page (or `/rfc verify` and `/rfc spinn
 
 ### 🏆 Class & Spec Profiles
 - Auto-detects your class and primary talent spec and seeds a matching profile with community-sourced default weights the first time you log in
+- Covers **both rosters**: Conquest of Azeroth's 21 custom classes (detected through Ascension's Character Advancement system) and the ten original WotLK classes — Warrior, Paladin, Hunter, Rogue, Priest, Death Knight, Shaman, Mage, Warlock, Druid — detected from the stock talent trees, with Wrath-era stat weights and the right armor-type filter for each
+- Two 3.3.5 talent trees don't say which role you play — a Feral druid is a cat or a bear, and a Death Knight tanks out of any tree — so those classes get an extra **Feral Tank** / **Tank** profile you pick yourself from the spec list; auto-detection never overrides a choice you made
 - Switch, save, and manage multiple named weight profiles per character
 - Auto-selection pauses if you manually switch profiles, and resumes with a simple command
 
@@ -142,7 +144,8 @@ mock 3.3.5 client — controllable clock, scriptable tooltip renders, a frame
 loop. From the addon folder, with any Lua 5.1:
 
 ```
-lua5.1 tests/test_verify.lua
+lua5.1 tests/test_verify.lua    # scan confirmation, stale renders, spinner
+lua5.1 tests/test_classes.lua   # class/spec default weights and detection
 ```
 
 The `tests/` folder isn't listed in `Refactor.toc`, so it never loads in-game.

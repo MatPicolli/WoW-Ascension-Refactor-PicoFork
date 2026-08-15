@@ -169,6 +169,19 @@ EquipCursorItem = function() end
 hooksecurefunc = function() end
 UnitName = function() return "Tester" end
 GetRealmName = function() return "Bronzebeard" end
+
+-- Class and talent trees. M.class is { displayName, classToken }; M.talentTabs
+-- is an ordered list of { name, pointsSpent }, matching GetTalentTabInfo.
+M.class = { "Warrior", "WARRIOR" }
+M.talentTabs = {}
+UnitClass = function() return M.class[1], M.class[2] end
+UnitLevel = function() return M.level or 80 end
+GetNumTalentTabs = function() return #M.talentTabs end
+GetTalentTabInfo = function(i)
+    local tab = M.talentTabs[i]
+    if not tab then return nil end
+    return tab.name, nil, tab.pointsSpent or 0
+end
 GameTooltip_ClearMoney = function() end
 
 return M
