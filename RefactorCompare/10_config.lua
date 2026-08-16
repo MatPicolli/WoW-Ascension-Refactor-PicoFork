@@ -96,6 +96,41 @@ local function SetHitCapPvP(enabled)
     C.RefreshConfig()
 end
 
+-- Forced full re-evaluation: throw away every cached scan, its sample
+-- history and every verdict derived from it, then redraw from nothing.
+--
+-- The addon already re-reads gear on its own — on bag and equip events, on
+-- level-up, when weights change, and continuously through the confirmation
+-- pass in 03_scan.lua. This is for the times Ascension changes an item
+-- underneath all of that with no event to show for it: a Rune of Ascension
+-- upgrade, a Mystic Enchant reroll, a scaling change that lands while the
+-- item sits in your bag. Nothing tells the client those happened, so the
+-- cached scan stays technically valid and the verdict stays wrong until its
+-- TTL runs out.
+--
+-- Deliberately the heaviest hammer available — the whole point is "trust
+-- nothing you already read" — which is why it isn't wired to any event and
+-- has to be asked for. Everything rebuilds lazily as items come back into
+-- view, so the cost is spread the same way a fresh login's is.
+--
+-- Exposed as /rfc rescan and RefactorCompareShared.Rescan() so it can go in
+-- a macro or be called from another addon. Returns how many cached scans
+-- were dropped.
+local function Rescan()
+    local dropped = 0
+    for _ in pairs(scanCache) do dropped = dropped + 1 end
+    WipeScanCache()
+    -- A tooltip open right now would otherwise keep the verdict it drew:
+    -- the client won't re-fire OnTooltipSetItem for something it's already
+    -- showing, so nothing would refresh it until the cursor moved.
+    if C.ForgetTooltipVerdicts then C.ForgetTooltipVerdicts() end
+    -- Bumps the memo generation and wipes the verdict/equipped caches, then
+    -- redraws bags, quest rewards, roll frames and vendor buttons.
+    C.RefreshOpenBags()
+    return dropped
+end
+RefactorCompareShared.Rescan = Rescan
+
 -- Turning scan confirmation on or off changes what every cached scan means
 -- — entries taken under the old rule carry the old rule's idea of "final" —
 -- so the cache is dropped with the setting rather than left to age out.
@@ -227,6 +262,11 @@ SlashCmdList.REFACTORCOMPARE = function(msg)
         C.RefreshOpenBags()
         C.RefreshConfig()
         Print("profile auto-selection re-enabled (now: '" .. RefactorCompareDB.activeProfile .. "').")
+    elseif cmd == "rescan" or cmd == "refresh" then
+        local dropped = Rescan()
+        Print("re-reading every item from scratch (" .. dropped
+            .. " cached scan" .. (dropped == 1 and "" or "s")
+            .. " dropped) — verdicts return as each item confirms.")
     elseif cmd == "spinner" then
         RefactorCompareDB.compareSpinner = not RefactorCompareDB.compareSpinner
         C.RefreshOpenBags()
@@ -350,7 +390,7 @@ SlashCmdList.REFACTORCOMPARE = function(msg)
             Print("usage: /rfc profile <name> | save <name> | delete <name> | list")
         end
     else
-        Print("commands: /rfc (config), toggle, alert, bagicons, spinner, verify, auto, debug, quality <n>, weight <stat> <n>, hitcap <off|melee|ranged|spell|pvp>, profile ..., secondary <name|off>")
+        Print("commands: /rfc (config), rescan, toggle, alert, bagicons, spinner, verify, auto, debug, quality <n>, weight <stat> <n>, hitcap <off|melee|ranged|spell|pvp>, profile ..., secondary <name|off>")
     end
 end
 

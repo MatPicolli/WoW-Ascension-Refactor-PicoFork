@@ -92,6 +92,7 @@ To undo everything, run `uninstall-silent-fizzles.cmd` from the same folder and 
 | Command | Effect |
 |---|---|
 | `/refactor` or `/rfc` | Open the Refactor config window |
+| `/rfc rescan` | Forget every cached item scan and re-read your gear from scratch (macro-friendly) |
 | `/rfc auto` | Resume automatic spec-based profile selection |
 | `/rfc verify` | Toggle multi-scan confirmation of item stats |
 | `/rfc spinner` | Toggle the loading animation shown while comparing |
