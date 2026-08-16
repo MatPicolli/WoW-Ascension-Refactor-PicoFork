@@ -49,6 +49,7 @@
 -- Slash commands (/rfc and /refactor are interchangeable):
 --   /rfc                     open/close the config panel
 --   /rfc toggle              enable/disable the whole feature
+--   /rfc rescan              forget every cached scan and re-read all gear
 --   /rfc bagicons            toggle the green upgrade arrow on bag item slots
 --   /rfc spinner             toggle the loading spinner shown while comparing
 --   /rfc verify              toggle multi-scan confirmation of item stats

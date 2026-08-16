@@ -69,6 +69,13 @@ end
 
 -- Tooltip behavior: lines come from M.render, exposed as the global
 -- "<name>TextLeft<i>" / "<name>TextRight<i>" font strings the scanner reads.
+-- What the tooltip currently claims to be showing; set M.shownItem or the
+-- frame's own .item to drive the (name, link) pair addons read back.
+function frameMT:GetItem()
+    local it = self.item
+    if not it then return nil end
+    return it.name, it.link
+end
 function frameMT:ClearLines() self.lines = {} end
 function frameMT:NumLines() return #(self.lines or {}) end
 function frameMT:SetLines(lines)

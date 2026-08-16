@@ -719,7 +719,13 @@ tipRetryFrame:SetScript("OnUpdate", function(self, elapsed)
     end
 end)
 
+-- Every tooltip this file hooks, so a forced re-scan (/rfc rescan) can drop
+-- the verdicts already drawn on them instead of leaving a stale percentage
+-- sitting under the cursor.
+local hookedTips = {}
+
 local function HookTooltip(tip)
+    hookedTips[#hookedTips + 1] = tip
     tip:HookScript("OnTooltipSetItem", function(self)
         local _, link = self:GetItem()
         -- Dupe guard keyed on the link (not a plain boolean): the same
@@ -765,6 +771,31 @@ HookTooltip(ItemRefTooltip)
 -- hovered on the map got no verdict while the same reward in the quest
 -- log (QUEST_TEMPLATE_LOG, GameTooltip) did.
 if WorldMapTooltip then HookTooltip(WorldMapTooltip) end
+
+-- Clears the verdict this addon drew on every hooked tooltip and forgets
+-- the "already handled this link" guard, so the next look recomputes from
+-- scratch. A tooltip that's open right now gets its pipeline re-run on the
+-- spot (the client won't re-fire OnTooltipSetItem for a tooltip it is
+-- already showing, so nothing else would refresh it until the cursor
+-- moves). Used by the forced re-scan in 10_config.lua.
+function C.ForgetTooltipVerdicts()
+    local reopen, reopenLink
+    for _, tip in ipairs(hookedTips) do
+        tip.refactorCompareDone = nil
+        ForgetOwnLines(tip)
+        HideLineArrow(tip)
+        -- GetItem is guarded like every other tooltip method this file
+        -- reaches for: the hooked set includes WorldMapTooltip, which this
+        -- custom client is free to build differently.
+        if not reopen and tip.GetItem and tip:IsShown() then
+            local _, link = tip:GetItem()
+            if link then reopen, reopenLink = tip, link end
+        end
+    end
+    -- One retry slot exists, so the visible tooltip is the one worth spending
+    -- it on; everything else refreshes when it's next shown.
+    if reopen then StartTipRetry(reopen, reopenLink) end
+end
 
 C.SetArrowAtlas = SetArrowAtlas
 C.SpinnerShow = SpinnerShow
