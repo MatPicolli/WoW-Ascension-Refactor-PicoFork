@@ -19,31 +19,37 @@ local CharKey = C.CharKey
 -- guaranteed to never collide with anything else, at the cost of the
 -- compact corner-badge look. Direction is still unambiguous — sign on
 -- the percentage plus red/green — even without the arrow icon.
-local ARROW_TEXTURE = "Interface\\AddOns\\Refactor\\arrow" -- fallback texture asset
-local LOOT_TOAST_ATLAS = "Interface\\LootFrame\\LootToastAtlas"
-
-local ATLAS_COORDS = {
-    ["loottoast-arrow-green"] = { left = 0.858398, right = 0.878906, top = 0.158203, bottom = 0.207031 },
-    ["loottoast-arrow-blue"]  = { left = 0.835938, right = 0.856445, top = 0.158203, bottom = 0.207031 },
-    ["loottoast-arrow-red"]   = { left = 0.878906, right = 0.899414, top = 0.158203, bottom = 0.207031 },
-}
+local ARROW_TEXTURE = "Interface\\AddOns\\Refactor\\arrow" -- the addon's own bundled triangle
 
 local function SetArrowAtlas(arrow, atlasName, fallbackR, fallbackG, fallbackB, flipY)
-    local coords = ATLAS_COORDS[atlasName] or ATLAS_COORDS["loottoast-arrow-green"]
-    if coords then
-        if arrow:SetTexture(LOOT_TOAST_ATLAS) then
-            local top = flipY and coords.bottom or coords.top
-            local bottom = flipY and coords.top or coords.bottom
-            arrow:SetTexCoord(coords.left, coords.right, top, bottom)
-            if arrow.SetDesaturated then arrow:SetDesaturated(false) end
-            if fallbackR and fallbackG and fallbackB then
-                arrow:SetVertexColor(fallbackR, fallbackG, fallbackB)
-            else
-                arrow:SetVertexColor(1, 1, 1)
-            end
-            return true
-        end
+    -- The addon's own bundled triangle FIRST: a 32x32 RGBA file shipped
+    -- with the addon, so its shape is never in question, unlike anything
+    -- sliced or named off a client asset this addon doesn't control.
+    --
+    -- This used to be the LAST resort, behind slicing fixed pixel
+    -- coordinates out of Interface\LootFrame\LootToastAtlas -- a real
+    -- Blizzard sprite sheet, but one whose exact layout on a given
+    -- server's client build there was never any way to verify from here.
+    -- Confirmed live on a non-Ascension server: that slice doesn't fail
+    -- (SetTexture succeeds, the file genuinely exists), it just silently
+    -- samples the WRONG patch of it -- no error, no fallback triggered,
+    -- just a small flat-colored square where an arrow should be. Since
+    -- there is no way to detect "the shape came out wrong" from Lua, and
+    -- Ascension (the only client this was ever confirmed correct against)
+    -- is gone, that path has been removed rather than left as a
+    -- coin-flip-shaped tertiary attempt.
+    if arrow:SetTexture(ARROW_TEXTURE) then
+        if arrow.SetDesaturated then arrow:SetDesaturated(false) end
+        arrow:SetTexCoord(0, 1, flipY and 1 or 0, flipY and 0 or 1)
+        arrow:SetVertexColor(fallbackR or 0, fallbackG or 1, fallbackB or 0)
+        return true
     end
+    -- A named atlas is the one enhancement worth trying past that: if the
+    -- client's OWN atlas system recognizes the name, its rendering is
+    -- authoritative rather than a guess. pcall-guarded: some clients
+    -- (confirmed: Project Ebonhold) implement SetAtlas via a third-party
+    -- compatibility shim that THROWS for an unrecognized name instead of
+    -- returning false.
     if arrow.SetAtlas then
         local ok = pcall(arrow.SetAtlas, arrow, atlasName)
         if ok then
@@ -57,15 +63,11 @@ local function SetArrowAtlas(arrow, atlasName, fallbackR, fallbackG, fallbackB, 
             return true
         end
     end
-    if arrow:SetTexture(ARROW_TEXTURE) then
-        if arrow.SetDesaturated then arrow:SetDesaturated(false) end
-        arrow:SetTexCoord(0, 1, flipY and 1 or 0, flipY and 0 or 1)
-        arrow:SetVertexColor(fallbackR or 0, fallbackG or 1, fallbackB or 0)
-        return true
-    else
-        arrow:SetTexture(fallbackR or 0, fallbackG or 1, fallbackB or 0, 0.9)
-        return false
-    end
+    -- True last resort: the bundled file somehow failed to load (should
+    -- never happen -- it ships with the addon). A flat colored quad at
+    -- least shows something at the right position, even shapeless.
+    arrow:SetTexture(fallbackR or 0, fallbackG or 1, fallbackB or 0, 0.9)
+    return false
 end
 
 --------------------------------------------------------------------------

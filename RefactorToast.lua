@@ -34,22 +34,33 @@ local FALLBACK_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 local SOLID = "Interface\\ChatFrame\\ChatFrameBackground" -- tintable solid
 local ACCENT = { 0.20, 1.00, 0.60 } -- the addon's chat-message green
 
-local LOOT_TOAST_ATLAS = "Interface\\LootFrame\\LootToastAtlas"
-
-local ATLAS_COORDS = {
-    ["loottoast-arrow-green"] = { left = 0.858398, right = 0.878906, top = 0.158203, bottom = 0.207031 },
-    ["loottoast-arrow-blue"]  = { left = 0.835938, right = 0.856445, top = 0.158203, bottom = 0.207031 },
-}
-
+-- The addon's own bundled triangle FIRST: a 32x32 RGBA file shipped with
+-- the addon, so its shape is never in question, unlike anything sliced or
+-- named off a client asset this addon doesn't control.
+--
+-- This used to be the LAST resort, behind slicing fixed pixel coordinates
+-- out of Interface\LootFrame\LootToastAtlas -- a real Blizzard sprite
+-- sheet, but one whose exact layout on a given server's client build there
+-- was never any way to verify from here. Confirmed live on a non-Ascension
+-- server: that slice doesn't fail (SetTexture succeeds, the file
+-- genuinely exists), it just silently samples the WRONG patch of it -- no
+-- error, no fallback triggered, just a small flat-colored square where an
+-- arrow should be. Since there is no way to detect "the shape came out
+-- wrong" from Lua, and Ascension (the only client this was ever confirmed
+-- correct against) is gone, that path has been removed rather than left
+-- as a coin-flip-shaped tertiary attempt.
 local function SetArrowAtlas(arrow, atlasName, fallbackR, fallbackG, fallbackB)
-    local coords = ATLAS_COORDS[atlasName]
-    if coords then
-        if arrow:SetTexture(LOOT_TOAST_ATLAS) then
-            arrow:SetTexCoord(coords.left, coords.right, coords.top, coords.bottom)
-            arrow:SetVertexColor(1, 1, 1)
-            return true
-        end
+    if arrow:SetTexture(ARROW_TEXTURE) then
+        arrow:SetTexCoord(0, 1, 0, 1)
+        arrow:SetVertexColor(fallbackR or 0, fallbackG or 1, fallbackB or 0)
+        return true
     end
+    -- A named atlas is the one enhancement worth trying past that: if the
+    -- client's OWN atlas system recognizes the name, its rendering is
+    -- authoritative rather than a guess. pcall-guarded: some clients
+    -- (confirmed: Project Ebonhold) implement SetAtlas via a third-party
+    -- compatibility shim that THROWS for an unrecognized name instead of
+    -- returning false.
     if arrow.SetAtlas then
         local ok = pcall(arrow.SetAtlas, arrow, atlasName)
         if ok then
@@ -58,6 +69,9 @@ local function SetArrowAtlas(arrow, atlasName, fallbackR, fallbackG, fallbackB)
             return true
         end
     end
+    -- GetAtlasInfo is client-reported metadata for a real named atlas, not
+    -- a hand-typed guess -- a different, safer category from the removed
+    -- pixel slice, so it stays as a further enhancement attempt.
     local info = GetAtlasInfo and GetAtlasInfo(atlasName)
     if info then
         arrow:SetTexture(info.file)
@@ -65,14 +79,11 @@ local function SetArrowAtlas(arrow, atlasName, fallbackR, fallbackG, fallbackB)
         arrow:SetVertexColor(1, 1, 1)
         return true
     end
-    if arrow:SetTexture(ARROW_TEXTURE) then
-        arrow:SetTexCoord(0, 1, 0, 1)
-        arrow:SetVertexColor(fallbackR or 0, fallbackG or 1, fallbackB or 0)
-        return true
-    else
-        arrow:SetTexture(fallbackR or 0, fallbackG or 1, fallbackB or 0, 0.9)
-        return false
-    end
+    -- True last resort: the bundled file somehow failed to load (should
+    -- never happen -- it ships with the addon). A flat colored quad at
+    -- least shows something at the right position, even shapeless.
+    arrow:SetTexture(fallbackR or 0, fallbackG or 1, fallbackB or 0, 0.9)
+    return false
 end
 
 local MIN_SCALE, MAX_SCALE, DEFAULT_SCALE = 0.6, 1.8, 1.0
