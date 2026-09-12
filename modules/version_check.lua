@@ -11,7 +11,7 @@
 do
     local VER_PREFIX = "RefactorVer"
     local myVersion = GetAddOnMetadata("Refactor", "Version") or "0"
-    local UPDATE_URL = "github.com/ProfetGit/Refactor-Ascension"
+    local UPDATE_URL = "github.com/MatPicolli/WoW-Ascension-Refactor-PicoFork"
 
     -- True when a is strictly newer than b. Compares dotted numeric
     -- segments piecewise ("1.10.0" > "1.9.2"); a missing segment counts

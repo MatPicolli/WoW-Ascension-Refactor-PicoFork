@@ -203,5 +203,37 @@ ok(bear.weights.STA > bear.weights.AGI, "and it actually values stamina")
 C.AutoApplyClassSpec()
 eq(RefactorCompareDB.activeProfile, "Druid - Feral Tank", "and auto-selection leaves it alone")
 
+--------------------------------------------------------------------------
+print("\n9. a server with no Ascension APIs and no stock talent signal")
+--------------------------------------------------------------------------
+-- Models a server like Project Ebonhold: standard classes, no Ascension
+-- globals at all (C_CharacterAdvancement, GetSpecialization -- the mock
+-- never defines them unless a test sets them up, same as a real non-
+-- Ascension client), and its own progression system instead of the stock
+-- talent trees -- so GetTalentTabInfo exists (this is still a 3.3.5
+-- client) but reports zero points spent in every tab, for a level-80
+-- character, indefinitely. This is deliberately NOT the "fresh character"
+-- case above: there is no level where real points would show up.
+ok(_G.C_CharacterAdvancement == nil, "no Character Advancement API present")
+ok(_G.GetSpecialization == nil, "no retail-style GetSpecialization present")
+
+local profile = LoginAs("Warrior", "WARRIOR", {
+    { name = "Arms", pointsSpent = 0 },
+    { name = "Fury", pointsSpent = 0 },
+    { name = "Protection", pointsSpent = 0 },
+}, 80)
+eq(profile, "Warrior - Arms",
+    "falls back to the class's first listed spec, same safety net as a fresh character")
+ok(RefactorCompareDB.profiles["Warrior - Arms"] ~= nil,
+    "and a real, usable profile was seeded from it -- no crash, no empty state")
+
+-- A deliberate pick still overrides the placeholder and survives future
+-- logins, exactly as it does for a class the fallback never touched.
+C.SelectSpecProfile("Protection")
+eq(RefactorCompareDB.activeProfile, "Warrior - Protection", "picking the real build switches to it")
+C.AutoApplyClassSpec()
+eq(RefactorCompareDB.activeProfile, "Warrior - Protection",
+    "and auto-detection -- still seeing nothing from GetTalentTabInfo -- leaves the choice alone")
+
 print(string.format("\n%d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)

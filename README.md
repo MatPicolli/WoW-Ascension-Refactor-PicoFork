@@ -1,10 +1,10 @@
 # Refactor
 
-A World of Warcraft addon for **[Ascension](https://ascension.gg)**, a custom classless WotLK 3.3.5 server. Refactor scores your gear against your own stat priorities, tells you the moment an item is an upgrade, and smooths out a pile of everyday annoyances — auto-loot, quest automation, transmog collection, and more.
+A World of Warcraft addon built for **[Ascension](https://ascension.gg)**, a custom classless WotLK 3.3.5 server — and, since its engine never assumes a fixed item database, it runs on any WotLK 3.3.5 server, including other custom realms like **[Project Ebonhold](https://project-ebonhold.com)**. Refactor scores your gear against your own stat priorities, tells you the moment an item is an upgrade, and smooths out a pile of everyday annoyances — auto-loot, quest automation, transmog collection, and more.
 
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-F16061?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/profetgit)
 
-> Built specifically for Ascension's Conquest of Azeroth system: 21 classes × 3-4 talent specs, each with hand-tuned default stat weights — plus the ten original WotLK classes for characters off CoA — and support for Ascension's server-side item scaling that most gear-scoring addons don't account for.
+> Built first for Ascension's Conquest of Azeroth system — 21 classes × 3-4 talent specs, each with hand-tuned default stat weights — and the ten original WotLK classes besides, with the live-tooltip scanning underneath both that most gear-scoring addons skip: it never trusts an item link to say what's actually in your bag, which is exactly what a server with per-instance stat variance (Ascension's scaling, Ebonhold's random gear affixes, or anything similar) requires. See [Playing on a server other than Ascension](#playing-on-a-server-other-than-ascension) for what that means in practice.
 
 ---
 
@@ -17,12 +17,12 @@ The core feature. Assign your own weight to every stat (Strength, Agility, Crit,
 - Green arrows on bag items that are upgrades
 - Smart slot logic — rings/trinkets/one-handers compare against your *weaker* equipped item, two-handers compare against your combined main+off hand
 - **Smart equip** — right-clicking a ring/trinket/one-hander into a full pair replaces whichever equipped item is actually weaker under your weights, instead of always the first slot
-- Correctly handles Ascension's **item scaling**: because Ascension scales item instances server-side (two copies of the same item link can have different stats), Refactor scans the *live* tooltip instead of trusting the item link — so verdicts are always accurate for the item actually in your bag, not some generic base version.
+- Correctly handles **per-instance item variance**: on servers where two copies of the same item link can carry different stats — Ascension's server-side scaling, Ebonhold's random gear affixes, or anything in that family — Refactor scans the *live* tooltip instead of trusting the item link, so verdicts are always accurate for the item actually in your bag, not some generic base version.
 - Never guesses: if an item can't be scanned (not cached client-side, hard requirement not met, etc.), no verdict is shown rather than a misleading one.
 
 #### Nothing here has fixed stats, so nothing is read only once
 
-An item's stats on Ascension belong to your copy of it, not to its name — they follow the zone it dropped in and your level, crafted pieces roll random affixes, Worldforged gear grows with Runes of Ascension, and Mystic Enchants rewrite lines under a link that never changes. Worse, the client will answer the first tooltip render of an item whose data has gone cold with the *base* item's numbers, then quietly correct itself a fraction of a second later — which is how a real downgrade briefly paints as a +21% upgrade.
+On a server like this, an item's stats belong to your copy of it, not to its name. On Ascension they follow the zone it dropped in and your level, crafted pieces roll random affixes, Worldforged gear grows with Runes of Ascension, and Mystic Enchants rewrite lines under a link that never changes; on Ebonhold, gear rolls random affixes of its own. Worse, on Ascension specifically the client will answer the first tooltip render of an item whose data has gone cold with the *base* item's numbers, then quietly correct itself a fraction of a second later — which is how a real downgrade briefly paints as a +21% upgrade.
 
 So Refactor treats a scan as a sample, not an answer:
 
@@ -34,7 +34,7 @@ Both halves are toggleable on the General page (or `/rfc verify` and `/rfc spinn
 
 ### 🏆 Class & Spec Profiles
 - Auto-detects your class and primary talent spec and seeds a matching profile with community-sourced default weights the first time you log in
-- Covers **both rosters**: Conquest of Azeroth's 21 custom classes (detected through Ascension's Character Advancement system) and the ten original WotLK classes — Warrior, Paladin, Hunter, Rogue, Priest, Death Knight, Shaman, Mage, Warlock, Druid — detected from the stock talent trees, with Wrath-era stat weights and the right armor-type filter for each
+- Covers **both rosters**: Conquest of Azeroth's 21 custom classes (detected through Ascension's Character Advancement system) and the ten original WotLK classes — Warrior, Paladin, Hunter, Rogue, Priest, Death Knight, Shaman, Mage, Warlock, Druid — detected from the stock talent trees, with Wrath-era stat weights and the right armor-type filter for each (see [Playing on a server other than Ascension](#playing-on-a-server-other-than-ascension) if your server replaces stock talent trees with something else, like Ebonhold's Skill Tree)
 - Two 3.3.5 talent trees don't say which role you play — a Feral druid is a cat or a bear, and a Death Knight tanks out of any tree — so those classes get an extra **Feral Tank** / **Tank** profile you pick yourself from the spec list; auto-detection never overrides a choice you made
 - Switch, save, and manage multiple named weight profiles per character
 - Auto-selection pauses if you manually switch profiles, and resumes with a simple command
@@ -43,7 +43,7 @@ Both halves are toggleable on the General page (or `/rfc verify` and `/rfc spinn
 Since Refactor auto-loots instantly (see below), the stock loot window never shows — so Refactor replaces it with animated toast popups: item icon, quality-colored name, stack count, and (if it's an upgrade) a pulsing glow with the % gain. Optionally shows the stack's auction-house value too (Auto/TSM/Auctionator, configurable on the Loot page).
 
 ### 💫 Crowd-Control Alert
-The 3.3.5 client has no loss-of-control display, so it's easy to miss *why* your character suddenly stopped responding. While you're stunned, feared, polymorphed, or otherwise CC'd, Refactor shows a large center-screen icon with a cooldown spiral, a label ("Stunned", "Feared", …) and a countdown. Recognizes the CC abilities of all 21 CoA classes plus NPC/boss CC. Movable, testable, and toggleable on the Tweaks page — roots and silences/disarms have their own sub-toggles.
+The 3.3.5 client has no loss-of-control display, so it's easy to miss *why* your character suddenly stopped responding. While you're stunned, feared, polymorphed, or otherwise CC'd, Refactor shows a large center-screen icon with a cooldown spiral, a label ("Stunned", "Feared", …) and a countdown. Recognizes the CC abilities of all 21 CoA classes by spell ID, with a tooltip-text fallback that covers NPC/boss CC and, less precisely, stock-class and other-server CC (see [Playing on a server other than Ascension](#playing-on-a-server-other-than-ascension)). Movable, testable, and toggleable on the Tweaks page — roots and silences/disarms have their own sub-toggles.
 
 ### ⚙️ Quality-of-Life Tweaks
 All individually toggleable:
@@ -134,8 +134,24 @@ You can also open the config window from the **minimap button** — left-click t
 
 ## Compatibility
 
-- Client: WotLK 3.3.5 (Interface 30300), Ascension-specific build
+- Client: WotLK 3.3.5 (Interface 30300) — built for Ascension, and works on other 3.3.5 servers (see below)
 - Bag addon support: works with the default Blizzard container frames, and hooks item slots directly for Bagnon, DragonUI's bundled Combuctor bags, AdiBags, and ElvUI if installed
+
+## Playing on a server other than Ascension
+
+Ascension is gone, and Refactor's gear-comparison engine never actually depended on it — it scans whatever tooltip the client renders and scores whatever stats it finds, with no fixed item database or Ascension-only API on its critical path. Every Ascension-specific hook (Character Advancement, `GetSpecialization`, the `ASCENSION_KNOWN_ENTRIES_*` events) is existence-checked and quietly does nothing when it isn't there. Concretely, this works out of the box on any 3.3.5 server:
+
+- Gear scanning, scoring, tooltip verdicts, bag/vendor/quest/roll arrows, loot toasts and alerts, the hit cap, and `/rfc rescan`
+- The ten original WotLK classes' default weights (Warrior, Paladin, Hunter, Rogue, Priest, Death Knight, Shaman, Mage, Warlock, Druid), auto-seeded by class the moment the stock `GetTalentTabInfo` API reports real spent points in a tree — which is how vanilla talent trees work on any standard-class server
+- Manual weight profiles: `/rfc weight <stat> <value>`, `/rfc profile save <name>`, and switching between saved profiles — none of this needs auto-detection to work
+
+What's approximate depends on how far a given server's own customizations reach:
+
+- **Spec auto-detection** needs *some* signal that a real spec was chosen. Servers that keep the stock 3-tab talent panel give it one for free. Servers that replace talents with something else of their own (Project Ebonhold's "Skill Tree" + "Echoes" system, by its own description, has no traditional specs) likely don't — I haven't played there and can't confirm what `GetTalentTabInfo` reports on that client. If it reports nothing, a new character's profile seeds from that class's *first listed spec* as a placeholder, the same safety-net fallback that already handles a level-1 character on any server. It's one click to fix: open the Stat Weights page and pick your actual build from the spec list, or just set weights by hand with `/rfc weight` — either way, auto-detection leaves your choice alone from then on.
+- **The crowd-control alert's fast path** (`RefactorCC.lua`) recognizes CC by spell ID, scraped from Ascension's own CoA class list — it won't match anything for stock classes or another server's reworked abilities. It falls back to reading the debuff's own tooltip text ("Stunned.", "Feared." at line start, which the client generates automatically for most CC), so the alert should still fire for common cases; it just won't be as fast or complete as the Ascension-tuned list.
+- Any server-specific item mechanic I don't know about (unusual affix wording, a custom stat line the scanner doesn't recognize) scores at the `Unknown (scanned)` weight until you give it one of its own with `/rfc weight <name> <value>` — it's never silently dropped.
+
+None of this has been verified against Ebonhold specifically (no server access from here) — if something doesn't detect correctly, it's very likely one of the two items above, and worth reporting so it can be tuned for real.
 
 ## Tests
 
