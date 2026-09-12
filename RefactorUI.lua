@@ -875,9 +875,21 @@ local function MakeSlider(parent, name, w, minV, maxV, step, get, set, displayBa
     s:SetOrientation("HORIZONTAL")
     s:SetMinMaxValues(minV, maxV)
     s:SetValueStep(step)
-    _G[name .. "Low"]:SetText("")
-    _G[name .. "High"]:SetText("")
-    _G[name .. "Text"]:SetText("")
+    -- OptionsSliderTemplate is stock FrameXML and names these children on
+    -- every 3.3.5-family client this addon has seen -- but this file's own
+    -- config window has shown up completely blank on at least one other
+    -- server (see BuildMetalBorder/ApplyAtlas below for the confirmed atlas
+    -- gap), so an unconditional index here is exactly the kind of thing
+    -- that turns one missing widget into the WHOLE window never finishing
+    -- construction: everything queued after whichever MakeSlider call runs
+    -- first (loot toast scale, world map scale, CC alert scale, and every
+    -- page/nav label built after them) would simply never get created.
+    -- Guarded the same way SkinMinimalScrollbar already guards its own
+    -- template-provided children.
+    local low, high, text = _G[name .. "Low"], _G[name .. "High"], _G[name .. "Text"]
+    if low then low:SetText("") end
+    if high then high:SetText("") end
+    if text then text:SetText("") end
 
     -- MinimalSliderBar art: hide the stock track regions, re-lay the
     -- three-piece track, and re-skin the engine thumb.
