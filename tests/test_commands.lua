@@ -169,5 +169,46 @@ for _, cmd in ipairs({ "", "toggle", "toggle", "alert", "alert", "bagicons",
         .. (good and "" or " -- " .. tostring(err)))
 end
 
+--------------------------------------------------------------------------
+print("\n6. the upgrade-arrow icon prioritizes the addon's own bundled art")
+--------------------------------------------------------------------------
+-- Regression test for a real report: on Project Ebonhold, upgrade arrows
+-- rendered as a plain colored SQUARE instead of an arrow shape, with no
+-- error at all. Root cause: SetArrowAtlas used to try slicing fixed pixel
+-- coordinates out of a Blizzard sprite sheet (Interface\LootFrame\
+-- LootToastAtlas) BEFORE falling back to the addon's own bundled
+-- arrow.tga -- and that slice doesn't fail (the file exists, SetTexture
+-- succeeds), it just samples the wrong patch on a client whose copy of
+-- the sprite sheet doesn't lay out the way the hardcoded coordinates
+-- assume. No crash to catch; the wrong shape just silently renders.
+--
+-- The fix reorders SetArrowAtlas to try the bundled asset FIRST (a file
+-- this addon ships and controls, so its shape is never in question) and
+-- removes the pixel-slice path entirely. This test verifies the ORDERING
+-- directly: with a mock SetAtlas that would throw for anything (and a
+-- counter proving whether it was even invoked), the bundled texture
+-- should succeed and SetAtlas should never be reached at all.
+local arrowFrame = CreateFrame("Frame", "RefactorArrowTestFrame")
+local arrowTex = arrowFrame:CreateTexture(nil, "OVERLAY")
+local atlasCalls = 0
+mock.SetAtlasBehavior("throws") -- knownAtlases empty: would throw for any name
+-- Wrap the mock's SetAtlas to count invocations without changing its
+-- throwing behavior, so "never called" is verifiable, not just "didn't
+-- crash" (which the pcall guard would already mask either way).
+local realSetAtlas = getmetatable(arrowTex).SetAtlas
+getmetatable(arrowTex).SetAtlas = function(self, atlas)
+    atlasCalls = atlasCalls + 1
+    return realSetAtlas(self, atlas)
+end
+
+local drawn = C.SetArrowAtlas(arrowTex, "loottoast-arrow-green", 0, 1, 0, false)
+ok(drawn == true, "SetArrowAtlas reports success")
+eq(atlasCalls, 0, "SetAtlas was never even attempted (bundled art won first)")
+ok(arrowTex.textureArgs ~= nil and arrowTex.textureArgs[1] == "Interface\\AddOns\\Refactor\\arrow",
+    "the texture actually drawn is the addon's own bundled triangle, not a flat-color fallback")
+
+getmetatable(arrowTex).SetAtlas = realSetAtlas
+mock.SetAtlasBehavior(nil)
+
 print(string.format("\n%d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)
