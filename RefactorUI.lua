@@ -194,18 +194,39 @@ local function MakeCheck(parent, x, y, width, label, desc, get, set, tip, isEnab
     return row
 end
 
--- Resolves an atlas name onto a texture. SetAtlas is preferred;
--- GetAtlasInfo + manual texcoords is the fallback if it is missing.
+-- Resolves an atlas name onto a texture. SetAtlas is preferred, but
+-- pcall-guarded: confirmed live on a non-Ascension server, some clients
+-- implement SetAtlas through a third-party compatibility shim
+-- (CompactRaidFrame's SharedExtendedMethods, there) that throws a hard
+-- Lua error for any atlas name it doesn't recognize, rather than
+-- quietly returning false the way a missing method would. Every atlas
+-- this file names is one Ascension itself added client-side, so an
+-- unrecognized name on someone else's client is the expected case, not
+-- an edge case -- and an unguarded call here took the ENTIRE window
+-- down with it: one border corner erroring mid-construction meant every
+-- remaining page, checkbox and nav label queued after it never got
+-- built, leaving only the flat background that had already drawn.
+-- Same fix RefactorCompare/05_tooltip.lua's SetArrowAtlas already
+-- carries for the exact same call, just never ported to this file's own
+-- (separately written) atlas helper.
+--
+-- GetAtlasInfo + manual texcoords is the next fallback; if even that
+-- comes back empty, a flat tinted quad -- so a client with neither still
+-- shows SOMETHING roughly where the art belongs (unstyled, but visible
+-- and clickable in the right spot) instead of true invisibility.
 local function ApplyAtlas(tex, atlas)
     if tex.SetAtlas then
-        tex:SetAtlas(atlas)
-        return
+        local ok = pcall(tex.SetAtlas, tex, atlas)
+        if ok then return end
     end
     local info = GetAtlasInfo and GetAtlasInfo(atlas)
-    if not info then return end
-    tex:SetTexture(info.file)
-    tex:SetTexCoord(info.leftTexCoord, info.rightTexCoord,
-                    info.topTexCoord, info.bottomTexCoord)
+    if info then
+        tex:SetTexture(info.file)
+        tex:SetTexCoord(info.leftTexCoord, info.rightTexCoord,
+                        info.topTexCoord, info.bottomTexCoord)
+        return
+    end
+    tex:SetTexture(C_BORDER[1], C_BORDER[2], C_BORDER[3], 0.6)
 end
 
 -- Keeps only the rightmost `keep` fraction of a texture's current

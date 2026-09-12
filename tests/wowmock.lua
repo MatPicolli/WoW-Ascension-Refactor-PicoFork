@@ -50,22 +50,87 @@ function frameMT:SetHeight() end
 function frameMT:SetSize() end
 function frameMT:SetAlpha() end
 function frameMT:SetVertexColor() end
-function frameMT:SetTexCoord() end
+function frameMT:SetTexCoord(...) self.texCoord = { ... } end
+function frameMT:GetTexCoord() return unpack(self.texCoord or { 0, 0, 0, 1, 1, 0, 1, 1 }) end
 function frameMT:SetDesaturated() end
-function frameMT:SetTexture() return true end
+-- Records what was drawn (args as given) so a test can tell "an atlas
+-- succeeded" from "fell back to a flat color" from "nothing was ever set".
+function frameMT:SetTexture(...) self.textureArgs = { ... }; return true end
 function frameMT:GetName() return self.name end
 function frameMT:GetID() return self.id or 0 end
 function frameMT:GetParent() return self.parent end
 function frameMT:SetOwner() end
 function frameMT:GetOwner() end
 function frameMT:CreateTexture()
-    return setmetatable({ scripts = {}, shown = false }, frameMT)
+    local t = setmetatable({ scripts = {}, shown = false }, frameMT)
+    if M.createdTextures then M.createdTextures[#M.createdTextures + 1] = t end
+    return t
 end
 function frameMT:CreateFontString()
-    return setmetatable({ scripts = {}, shown = false,
-        SetText = function() end, GetStringWidth = function() return 10 end },
-        frameMT)
+    return setmetatable({ scripts = {}, shown = false }, frameMT)
 end
+
+-- Generic no-op surface for everything else RefactorUI.lua's widgets call
+-- (Frame/Button/EditBox/Slider/FontString/Texture methods alike -- this
+-- mock doesn't distinguish object types the way the real client does, so
+-- one fat interface covers all of them). Getters return a value shaped
+-- like the real one so arithmetic on the result doesn't blow up; setters
+-- that matter for a test override individually on the instance.
+function frameMT:SetText(t) self.text = t end
+function frameMT:GetText() return self.text end
+function frameMT:GetStringWidth() return self.text and (#self.text * 6) or 10 end
+function frameMT:GetStringHeight() return 12 end
+function frameMT:SetTextColor() end
+function frameMT:SetJustifyH() end
+function frameMT:SetTextInsets() end
+function frameMT:SetFontObject() end
+function frameMT:SetNormalFontObject() end
+function frameMT:SetDisabledFontObject() end
+function frameMT:SetFontString() end
+function frameMT:SetHighlightTexture() end
+function frameMT:SetAllPoints() end
+function frameMT:SetFrameStrata() end
+function frameMT:SetFrameLevel() end
+function frameMT:SetToplevel() end
+function frameMT:SetMovable() end
+function frameMT:SetClampedToScreen() end
+function frameMT:EnableMouse() end
+function frameMT:EnableMouseWheel() end
+function frameMT:RegisterForDrag() end
+function frameMT:RegisterForClicks() end
+function frameMT:StartMoving() end
+function frameMT:StopMovingOrSizing() end
+function frameMT:SetOrientation() end
+function frameMT:SetMinMaxValues(lo, hi) self.minV, self.maxV = lo, hi end
+function frameMT:SetValueStep() end
+function frameMT:SetValue(v) self.value = v end
+function frameMT:GetValue() return self.value or 0 end
+function frameMT:GetThumbTexture() return nil end
+function frameMT:SetScrollChild() end
+function frameMT:SetGradientAlpha() end
+function frameMT:SetBlendMode() end
+function frameMT:SetBackdrop() end
+function frameMT:SetBackdropColor() end
+function frameMT:SetBackdropBorderColor() end
+function frameMT:Enable() self.enabled = true end
+function frameMT:Disable() self.enabled = false end
+function frameMT:IsEnabled() return self.enabled ~= false end
+function frameMT:LockHighlight() end
+function frameMT:UnlockHighlight() end
+function frameMT:IsMouseOver() return false end
+function frameMT:GetCenter() return 0, 0 end
+function frameMT:GetEffectiveScale() return 1 end
+function frameMT:GetWidth() return self.width or 100 end
+function frameMT:GetNumRegions() return 0 end
+function frameMT:GetRegions() end
+function frameMT:IsObjectType() return false end
+function frameMT:SetAutoFocus() end
+function frameMT:SetFocus() end
+function frameMT:ClearFocus() end
+function frameMT:HasFocus() return false end
+function frameMT:HighlightText() end
+function frameMT:AddLine() end
+function frameMT:AddMessage() end
 
 -- Tooltip behavior: lines come from M.render, exposed as the global
 -- "<name>TextLeft<i>" / "<name>TextRight<i>" font strings the scanner reads.
@@ -151,6 +216,24 @@ function M.Run(seconds, step)
     end
 end
 
+-- Stock Blizzard globals RefactorUI.lua reads directly (real WotLK client
+-- data, not addon-specific) -- present on every 3.3.5-family client this
+-- addon targets, Ascension and otherwise, so it belongs in the generic
+-- mock rather than a test-specific stub.
+ITEM_QUALITY_COLORS = {
+    [0] = { r = 0.62, g = 0.62, b = 0.62, hex = "|cff9d9d9d" },
+    [1] = { r = 1.00, g = 1.00, b = 1.00, hex = "|cffffffff" },
+    [2] = { r = 0.12, g = 1.00, b = 0.00, hex = "|cff1eff00" },
+    [3] = { r = 0.00, g = 0.44, b = 0.87, hex = "|cff0070dd" },
+    [4] = { r = 0.64, g = 0.21, b = 0.93, hex = "|cffa335ee" },
+    [5] = { r = 1.00, g = 0.50, b = 0.00, hex = "|cffff8000" },
+    [6] = { r = 0.90, g = 0.80, b = 0.50, hex = "|cffe6cc80" },
+    [7] = { r = 0.00, g = 0.80, b = 1.00, hex = "|cff00ccff" },
+}
+for q = 0, 7 do
+    _G["ITEM_QUALITY" .. q .. "_DESC"] = "Quality " .. q
+end
+
 -- Everything else the files touch at load or call time --------------------
 UIParent = CreateFrame("Frame", "UIParent")
 DEFAULT_CHAT_FRAME = { AddMessage = function(_, msg)
@@ -174,6 +257,40 @@ CursorHasItem = function() return false end
 PickupContainerItem = function() end
 EquipCursorItem = function() end
 hooksecurefunc = function() end
+IsAddOnLoaded = function() return false end
+
+-- Configurable SetAtlas behavior, for testing how atlas-consuming code
+-- reacts to different clients:
+--   nil/"none" -> no SetAtlas method at all (true stock 3.3.5, no atlas
+--                 support whatsoever)
+--   "ok"       -> SetAtlas exists and always succeeds (a client with full
+--                 atlas support, or one that happens to know every name
+--                 this addon asks for)
+--   "throws"   -> SetAtlas exists but THROWS for any atlas name not in
+--                 M.knownAtlases, instead of quietly returning false --
+--                 this is the confirmed, reported shape: a real client
+--                 (Project Ebonhold) implements SetAtlas via a third-party
+--                 compatibility shim that errors "SetAtlas: Atlas named
+--                 X does not exist" for anything it doesn't recognize.
+--                 M.knownAtlases stays empty by default, matching the
+--                 real case where an Ascension-only atlas name is never
+--                 one that shim knows.
+M.knownAtlases = {}
+M.createdTextures = {}
+function M.SetAtlasBehavior(mode)
+    if mode == "ok" then
+        frameMT.SetAtlas = function(self, atlas) self.atlas = atlas; return true end
+    elseif mode == "throws" then
+        frameMT.SetAtlas = function(self, atlas)
+            if M.knownAtlases[atlas] then self.atlas = atlas; return true end
+            error("SetAtlas: Atlas named " .. tostring(atlas) .. " does not exist")
+        end
+    else
+        frameMT.SetAtlas = nil
+    end
+end
+M.SetAtlasBehavior(nil)
+
 UnitName = function() return "Tester" end
 GetRealmName = function() return "Bronzebeard" end
 

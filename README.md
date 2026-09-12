@@ -163,6 +163,8 @@ loop. From the addon folder, with any Lua 5.1:
 ```
 lua5.1 tests/test_verify.lua    # scan confirmation, stale renders, spinner
 lua5.1 tests/test_classes.lua   # class/spec default weights and detection
+lua5.1 tests/test_commands.lua  # the /rfc command surface, including rescan
+lua5.1 tests/test_ui.lua        # the config window, including atlas-less/atlas-throwing clients
 ```
 
 The `tests/` folder isn't listed in `Refactor.toc`, so it never loads in-game.
